@@ -13,6 +13,10 @@
 # testing
 /coverage
 
+# LibTV 运行时数据：任务持久化 + 转存的生成产物
+/.data/
+/public/generated/
+
 # next.js
 /.next/
 /out/

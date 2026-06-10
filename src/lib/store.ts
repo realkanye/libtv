@@ -9,9 +9,18 @@ import {
   type Connection,
 } from "@xyflow/react";
 import type { LibNode, LibNodeData, NodeKind } from "./types";
-import { NODE_KIND_META } from "./types";
+import { defaultCapabilityForKind } from "./providers/catalog";
+import { paramDefaults } from "./providers/params";
 
 let nodeSeq = 0;
+
+/** 上游已完成节点拆解出的生成输入。 */
+export interface UpstreamInputs {
+  /** 图片节点产物 URL，顺序即连接顺序（首帧在前、尾帧在后）。 */
+  images: string[];
+  /** 文本/分镜节点正文，作为提示词增强。 */
+  refTexts: string[];
+}
 
 interface CanvasState {
   nodes: LibNode[];
@@ -21,8 +30,8 @@ interface CanvasState {
   onConnect: (connection: Connection) => void;
   addNode: (kind: NodeKind, position: { x: number; y: number }) => void;
   updateNodeData: (id: string, patch: Partial<LibNodeData>) => void;
-  /** 收集上游已完成节点的内容，作为生成时的参考输入 */
-  upstreamContext: (id: string) => string[];
+  /** 收集上游已完成节点的内容（区分图片参考与文本参考）。 */
+  upstreamInputs: (id: string) => UpstreamInputs;
 }
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
@@ -38,7 +47,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onConnect: (connection) =>
     set({ edges: addEdge({ ...connection, animated: true }, get().edges) }),
 
-  addNode: (kind, position) =>
+  addNode: (kind, position) => {
+    const cap = defaultCapabilityForKind(kind);
     set({
       nodes: [
         ...get().nodes,
@@ -49,14 +59,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           data: {
             kind,
             prompt: "",
-            model: NODE_KIND_META[kind].models[0],
+            providerId: cap.providerId,
+            modelId: cap.modelId,
+            params: paramDefaults(cap),
             content: null,
             shots: null,
             status: "idle",
+            progress: 0,
+            errorMessage: null,
+            taskId: null,
           },
         },
       ],
-    }),
+    });
+  },
 
   updateNodeData: (id, patch) =>
     set({
@@ -65,16 +81,21 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       ),
     }),
 
-  upstreamContext: (id) => {
+  upstreamInputs: (id) => {
     const { nodes, edges } = get();
-    return edges
+    const sources = edges
       .filter((e) => e.target === id)
       .map((e) => nodes.find((n) => n.id === e.source))
-      .filter((n): n is LibNode => !!n && n.data.status === "done")
-      .map((n) =>
-        n.data.kind === "text"
-          ? `[文本参考] ${n.data.content}`
-          : `[${NODE_KIND_META[n.data.kind].label}参考] ${n.data.content}`
-      );
+      .filter((n): n is LibNode => !!n && n.data.status === "done");
+
+    const images: string[] = [];
+    const refTexts: string[] = [];
+    for (const n of sources) {
+      const { kind, content } = n.data;
+      if (!content) continue;
+      if (kind === "image") images.push(content);
+      else if (kind === "text" || kind === "script") refTexts.push(content);
+    }
+    return { images, refTexts };
   },
 }));
