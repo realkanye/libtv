@@ -51,12 +51,34 @@ export interface UpstreamInputs {
 /** 单节点剪贴板（复制粘贴不保留连线；模块级即可，无需持久化）。 */
 let clipboard: { kind: NodeKind; data: LibNodeData } | null = null;
 
+/** 历史快照（仅结构性变更入栈：增删/连线/副本/粘贴/拖动）。 */
+interface Snapshot {
+  nodes: LibNode[];
+  edges: Edge[];
+}
+const HISTORY_CAP = 50;
+
+function snapshot(nodes: LibNode[], edges: Edge[]): Snapshot {
+  // 结构无函数，JSON 深拷贝即可，且与持久化序列化口径一致
+  return {
+    nodes: JSON.parse(JSON.stringify(nodes)) as LibNode[],
+    edges: JSON.parse(JSON.stringify(edges)) as Edge[],
+  };
+}
+
 interface CanvasState {
   nodes: LibNode[];
   edges: Edge[];
+  /** 撤销栈 / 重做栈（不持久化）。 */
+  past: Snapshot[];
+  future: Snapshot[];
   onNodesChange: (changes: NodeChange<LibNode>[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
+  /** 在结构性变更前调用，记录一帧用于撤销。 */
+  commitHistory: () => void;
+  undo: () => void;
+  redo: () => void;
   /** 新建空节点，返回节点 ID。 */
   addNode: (
     kind: NodeKind,
@@ -86,159 +108,211 @@ interface CanvasState {
 
 export const useCanvasStore = create<CanvasState>()(
   persist(
-    (set, get) => ({
-      nodes: [],
-      edges: [],
+    (set, get) => {
+      /** 结构性变更前记录一帧；清空重做栈。 */
+      const commit = () => {
+        const { nodes, edges, past } = get();
+        const next = [...past, snapshot(nodes, edges)];
+        if (next.length > HISTORY_CAP) next.shift();
+        set({ past: next, future: [] });
+      };
 
-      onNodesChange: (changes) =>
-        set({ nodes: applyNodeChanges(changes, get().nodes) }),
+      return {
+        nodes: [],
+        edges: [],
+        past: [],
+        future: [],
 
-      onEdgesChange: (changes) =>
-        set({ edges: applyEdgeChanges(changes, get().edges) }),
+        onNodesChange: (changes) => {
+          // 删除节点是结构性操作（含 Delete 键路径），入栈以便撤销
+          if (changes.some((c) => c.type === "remove")) commit();
+          set({ nodes: applyNodeChanges(changes, get().nodes) });
+        },
 
-      onConnect: (connection) =>
-        set({ edges: addEdge({ ...connection, animated: true }, get().edges) }),
+        onEdgesChange: (changes) => {
+          if (changes.some((c) => c.type === "remove")) commit();
+          set({ edges: applyEdgeChanges(changes, get().edges) });
+        },
 
-      addNode: (kind, position, init) => {
-        const id = newNodeId(kind);
-        set({
-          nodes: [
-            ...get().nodes,
-            { id, type: kind, position, data: { ...defaultData(kind), ...init } },
-          ],
-        });
-        return id;
-      },
+        onConnect: (connection) => {
+          commit();
+          set({ edges: addEdge({ ...connection, animated: true }, get().edges) });
+        },
 
-      addContentNode: (kind, position, content) => {
-        const id = newNodeId(kind);
-        set({
-          nodes: [
-            ...get().nodes,
-            {
-              id,
-              type: kind,
-              position,
-              data: { ...defaultData(kind), status: "done", ...content },
-            },
-          ],
-        });
-        return id;
-      },
+        commitHistory: () => commit(),
 
-      updateNodeData: (id, patch) =>
-        set({
-          nodes: get().nodes.map((n) =>
-            n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
-          ),
-        }),
+        undo: () => {
+          const { past, future, nodes, edges } = get();
+          if (!past.length) return;
+          const prev = past[past.length - 1];
+          set({
+            past: past.slice(0, -1),
+            future: [...future, snapshot(nodes, edges)],
+            nodes: prev.nodes,
+            edges: prev.edges,
+          });
+        },
 
-      removeNodes: (ids) => {
-        const idSet = new Set(ids);
-        set({
-          nodes: get().nodes.filter((n) => !idSet.has(n.id)),
-          edges: get().edges.filter(
-            (e) => !idSet.has(e.source) && !idSet.has(e.target)
-          ),
-        });
-      },
+        redo: () => {
+          const { past, future, nodes, edges } = get();
+          if (!future.length) return;
+          const next = future[future.length - 1];
+          set({
+            future: future.slice(0, -1),
+            past: [...past, snapshot(nodes, edges)],
+            nodes: next.nodes,
+            edges: next.edges,
+          });
+        },
 
-      duplicateNode: (id) => {
-        const node = get().nodes.find((n) => n.id === id);
-        if (!node) return null;
-        const newId = newNodeId(node.data.kind);
-        const clonedEdges = get()
-          .edges.filter((e) => e.source === id || e.target === id)
-          .map((e, i) => ({
-            ...e,
-            id: `${newId}-edge-${i}`,
-            source: e.source === id ? newId : e.source,
-            target: e.target === id ? newId : e.target,
-          }));
-        set({
-          nodes: [
-            ...get().nodes,
-            {
-              ...node,
-              id: newId,
-              position: { x: node.position.x + 48, y: node.position.y + 48 },
-              selected: false,
-              data: { ...node.data, taskId: null },
-            },
-          ],
-          edges: [...get().edges, ...clonedEdges],
-        });
-        return newId;
-      },
+        addNode: (kind, position, init) => {
+          commit();
+          const id = newNodeId(kind);
+          set({
+            nodes: [
+              ...get().nodes,
+              { id, type: kind, position, data: { ...defaultData(kind), ...init } },
+            ],
+          });
+          return id;
+        },
 
-      copyNode: (id) => {
-        const node = get().nodes.find((n) => n.id === id);
-        if (!node) return false;
-        clipboard = { kind: node.data.kind, data: { ...node.data, taskId: null } };
-        return true;
-      },
+        addContentNode: (kind, position, content) => {
+          commit();
+          const id = newNodeId(kind);
+          set({
+            nodes: [
+              ...get().nodes,
+              {
+                id,
+                type: kind,
+                position,
+                data: { ...defaultData(kind), status: "done", ...content },
+              },
+            ],
+          });
+          return id;
+        },
 
-      pasteNode: (position) => {
-        if (!clipboard) return null;
-        const id = newNodeId(clipboard.kind);
-        set({
-          nodes: [
-            ...get().nodes,
-            {
-              id,
-              type: clipboard.kind,
-              position,
-              data: { ...clipboard.data },
-            },
-          ],
-        });
-        return id;
-      },
+        updateNodeData: (id, patch) =>
+          set({
+            nodes: get().nodes.map((n) =>
+              n.id === id ? { ...n, data: { ...n.data, ...patch } } : n
+            ),
+          }),
 
-      hasClipboard: () => clipboard !== null,
+        removeNodes: (ids) => {
+          commit();
+          const idSet = new Set(ids);
+          set({
+            nodes: get().nodes.filter((n) => !idSet.has(n.id)),
+            edges: get().edges.filter(
+              (e) => !idSet.has(e.source) && !idSet.has(e.target)
+            ),
+          });
+        },
 
-      addEdgeBetween: (source, target) => {
-        const exists = get().edges.some(
-          (e) => e.source === source && e.target === target
-        );
-        if (exists) return;
-        set({
-          edges: [
-            ...get().edges,
-            {
-              id: `e-${source}-${target}`,
-              source,
-              target,
-              animated: true,
-            },
-          ],
-        });
-      },
+        duplicateNode: (id) => {
+          const node = get().nodes.find((n) => n.id === id);
+          if (!node) return null;
+          commit();
+          const newId = newNodeId(node.data.kind);
+          const clonedEdges = get()
+            .edges.filter((e) => e.source === id || e.target === id)
+            .map((e, i) => ({
+              ...e,
+              id: `${newId}-edge-${i}`,
+              source: e.source === id ? newId : e.source,
+              target: e.target === id ? newId : e.target,
+            }));
+          set({
+            nodes: [
+              ...get().nodes,
+              {
+                ...node,
+                id: newId,
+                position: { x: node.position.x + 48, y: node.position.y + 48 },
+                selected: false,
+                data: { ...node.data, taskId: null },
+              },
+            ],
+            edges: [...get().edges, ...clonedEdges],
+          });
+          return newId;
+        },
 
-      upstreamInputs: (id) => {
-        const { nodes, edges } = get();
-        const sources = edges
-          .filter((e) => e.target === id)
-          .map((e) => nodes.find((n) => n.id === e.source))
-          .filter((n): n is LibNode => !!n && n.data.status === "done");
+        copyNode: (id) => {
+          const node = get().nodes.find((n) => n.id === id);
+          if (!node) return false;
+          clipboard = { kind: node.data.kind, data: { ...node.data, taskId: null } };
+          return true;
+        },
 
-        const inputs: UpstreamInputs = {
-          images: [],
-          videos: [],
-          audios: [],
-          refTexts: [],
-        };
-        for (const n of sources) {
-          const { kind, content } = n.data;
-          if (!content) continue;
-          if (kind === "image") inputs.images.push(content);
-          else if (kind === "video") inputs.videos.push(content);
-          else if (kind === "audio") inputs.audios.push(content);
-          else inputs.refTexts.push(content);
-        }
-        return inputs;
-      },
-    }),
+        pasteNode: (position) => {
+          if (!clipboard) return null;
+          commit();
+          const id = newNodeId(clipboard.kind);
+          set({
+            nodes: [
+              ...get().nodes,
+              {
+                id,
+                type: clipboard.kind,
+                position,
+                data: { ...clipboard.data },
+              },
+            ],
+          });
+          return id;
+        },
+
+        hasClipboard: () => clipboard !== null,
+
+        addEdgeBetween: (source, target) => {
+          // 不入历史栈：仅供流水线/合成/拉线建节点等程序化连线使用，
+          // 这些场景的撤销点由配套的 addNode 已记录。手动连线走 onConnect（已入栈）。
+          const exists = get().edges.some(
+            (e) => e.source === source && e.target === target
+          );
+          if (exists) return;
+          set({
+            edges: [
+              ...get().edges,
+              {
+                id: `e-${source}-${target}`,
+                source,
+                target,
+                animated: true,
+              },
+            ],
+          });
+        },
+
+        upstreamInputs: (id) => {
+          const { nodes, edges } = get();
+          const sources = edges
+            .filter((e) => e.target === id)
+            .map((e) => nodes.find((n) => n.id === e.source))
+            .filter((n): n is LibNode => !!n && n.data.status === "done");
+
+          const inputs: UpstreamInputs = {
+            images: [],
+            videos: [],
+            audios: [],
+            refTexts: [],
+          };
+          for (const n of sources) {
+            const { kind, content } = n.data;
+            if (!content) continue;
+            if (kind === "image") inputs.images.push(content);
+            else if (kind === "video") inputs.videos.push(content);
+            else if (kind === "audio") inputs.audios.push(content);
+            else inputs.refTexts.push(content);
+          }
+          return inputs;
+        },
+      };
+    },
     {
       name: "libtv-canvas-v1",
       // SSR 下跳过自动注水，由 Canvas 挂载后手动 rehydrate（避免 hydration mismatch）

@@ -71,6 +71,24 @@ describe("KlingProvider 请求构造", () => {
     expect(body.duration).toBe("5");
   });
 
+  it("图+文生视频：连入参考文本合并进 prompt", async () => {
+    withKeys();
+    const calls = mockFetch({ code: 0, data: { task_id: "k9" } });
+    const provider = new KlingProvider();
+    await provider.createTask({
+      providerId: "kling",
+      modelId: "kling-v2-5-turbo",
+      mode: "image-to-video",
+      prompt: "镜头缓慢推近",
+      images: ["http://a/first.png"],
+      refTexts: ["氛围紧张", "夜晚"],
+      params: { aspectRatio: "16:9", duration: 5 },
+    });
+    const body = JSON.parse(calls[0].opts.body as string);
+    expect(body.prompt).toBe("镜头缓慢推近\n氛围紧张\n夜晚");
+    expect(body.image).toBe("http://a/first.png");
+  });
+
   it("首尾帧走 image2video，带 image_tail", async () => {
     withKeys();
     const calls = mockFetch({ code: 0, data: { task_id: "k2" } });

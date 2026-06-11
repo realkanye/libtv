@@ -30,7 +30,13 @@ const nodeTypes = {
 const KINDS = Object.keys(NODE_KIND_META) as NodeKind[];
 
 type MenuState =
-  | { type: "pane"; screen: { x: number; y: number }; flow: { x: number; y: number } }
+  | {
+      type: "pane";
+      screen: { x: number; y: number };
+      flow: { x: number; y: number };
+      /** 由「拉线建节点」触发时，新建节点自动连接的源节点。 */
+      connectFrom?: string;
+    }
   | { type: "node"; screen: { x: number; y: number }; nodeId: string };
 
 async function uploadFile(file: File): Promise<{ url: string; kind: NodeKind } | { error: string }> {
@@ -72,13 +78,18 @@ function ContextMenu({
     >
       {menu.type === "pane" && (
         <>
-          <div className="px-3 py-1 text-[10px] text-zinc-500">添加节点</div>
+          <div className="px-3 py-1 text-[10px] text-zinc-500">
+            {menu.connectFrom ? "拉线新建并连接" : "添加节点"}
+          </div>
           {KINDS.map((kind) => (
             <button
               key={kind}
               className={itemCls}
               onClick={() => {
-                store.getState().addNode(kind, menu.flow);
+                const id = store.getState().addNode(kind, menu.flow);
+                if (menu.connectFrom) {
+                  store.getState().addEdgeBetween(menu.connectFrom, id);
+                }
                 onClose();
               }}
             >
@@ -221,6 +232,36 @@ function CanvasInner() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastPointer = useRef({ x: 0, y: 0 });
+  const connectingFrom = useRef<string | null>(null);
+
+  // 拉线建节点：记录起点节点；松手落在空白处则弹出选择器并自动连接
+  const onConnectStart = useCallback(
+    (_: unknown, params: { nodeId: string | null }) => {
+      connectingFrom.current = params.nodeId;
+    },
+    []
+  );
+  const onConnectEnd = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      const from = connectingFrom.current;
+      connectingFrom.current = null;
+      if (!from) return;
+      const target = event.target as HTMLElement | null;
+      // 落在画布空白（pane）才新建；落在已有节点/handle 则视为正常连线
+      if (!target?.classList.contains("react-flow__pane")) return;
+      const point =
+        "clientX" in event
+          ? { x: event.clientX, y: event.clientY }
+          : { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY };
+      setMenu({
+        type: "pane",
+        screen: point,
+        flow: screenToFlowPosition(point),
+        connectFrom: from,
+      });
+    },
+    [screenToFlowPosition]
+  );
 
   // localStorage 注水（SSR 安全），注水完成后再恢复刷新前进行中的任务
   useEffect(() => {
@@ -326,10 +367,19 @@ function CanvasInner() {
         return;
       if (!(e.ctrlKey || e.metaKey)) return;
       const state = useCanvasStore.getState();
-      if (e.key === "c") {
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        // Cmd/Ctrl+Z 撤销；+Shift 或 Ctrl+Y 重做
+        e.preventDefault();
+        if (e.shiftKey) state.redo();
+        else state.undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        state.redo();
+      } else if (key === "c") {
         const sel = state.nodes.find((n) => n.selected);
         if (sel) state.copyNode(sel.id);
-      } else if (e.key === "v") {
+      } else if (key === "v") {
         if (state.hasClipboard()) {
           state.pasteNode(
             screenToFlowPosition({
@@ -369,6 +419,9 @@ function CanvasInner() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectStart={onConnectStart}
+        onConnectEnd={onConnectEnd}
+        onNodeDragStart={() => useCanvasStore.getState().commitHistory()}
         onNodesDelete={(deleted) =>
           releaseNodeStreams(deleted.map((n) => n.data.taskId))
         }

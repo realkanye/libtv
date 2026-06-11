@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { ProviderError } from "./types";
 import { CATALOG } from "./catalog";
+import { effectivePrompt } from "./prompt";
 
 import type { ShotRow } from "@/lib/types";
 
@@ -184,11 +185,12 @@ export class ArkProvider implements GenerationProvider {
     const size = arkImageSize(req.params?.aspectRatio, req.params?.resolution);
     const count = req.params?.count ?? 1;
     const refImages = req.images ?? [];
+    const prompt = effectivePrompt(req); // 合并连入的参考文本（图+文生图）
 
     const once = async (): Promise<GenerationOutput> => {
       const body: Record<string, unknown> = {
         model,
-        prompt: req.prompt,
+        prompt,
         size,
         response_format: "url",
         watermark: false,
@@ -213,9 +215,9 @@ export class ArkProvider implements GenerationProvider {
   /** Seedance：创建异步任务，返回 task id。 */
   private async createVideo(req: UnifiedRequest): Promise<CreateTaskResult> {
     const model = this.resolveModelId(req);
-    const content: Record<string, unknown>[] = [
-      { type: "text", text: req.prompt + arkVideoPromptFlags(req) },
-    ];
+    // 合并连入的参考文本（图+文生视频）
+    const text = effectivePrompt(req) + arkVideoPromptFlags(req);
+    const content: Record<string, unknown>[] = [{ type: "text", text }];
     // 首帧图（image-to-video）
     if (req.images?.[0]) {
       content.push({ type: "image_url", image_url: { url: req.images[0] } });

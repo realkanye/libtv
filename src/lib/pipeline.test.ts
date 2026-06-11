@@ -38,7 +38,7 @@ import {
 } from "./pipeline";
 
 function reset() {
-  useCanvasStore.setState({ nodes: [], edges: [] });
+  useCanvasStore.setState({ nodes: [], edges: [], past: [], future: [] });
   generationOrder.length = 0;
 }
 
@@ -71,6 +71,38 @@ describe("store 节点操作", () => {
     useCanvasStore.getState().removeNodes([a]);
     expect(useCanvasStore.getState().nodes).toHaveLength(1);
     expect(useCanvasStore.getState().edges).toHaveLength(0);
+  });
+
+  it("撤销/重做：新建与删除可回退", () => {
+    const s = useCanvasStore.getState();
+    const a = s.addNode("text", { x: 0, y: 0 });
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+
+    useCanvasStore.getState().addNode("image", { x: 100, y: 0 });
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+
+    useCanvasStore.getState().undo(); // 撤销加 image
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+    useCanvasStore.getState().redo(); // 重做
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+
+    useCanvasStore.getState().removeNodes([a]); // 删 text
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+    useCanvasStore.getState().undo(); // 撤销删除
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    expect(useCanvasStore.getState().nodes.some((n) => n.id === a)).toBe(true);
+  });
+
+  it("新建操作会清空重做栈", () => {
+    const s = useCanvasStore.getState();
+    s.addNode("text", { x: 0, y: 0 });
+    useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes).toHaveLength(0);
+    // 撤销后做新操作 → 重做栈应清空
+    useCanvasStore.getState().addNode("image", { x: 0, y: 0 });
+    useCanvasStore.getState().redo(); // 无可重做
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+    expect(useCanvasStore.getState().nodes[0].data.kind).toBe("image");
   });
 
   it("upstreamInputs 按类型分组且只取已完成节点", () => {

@@ -11,6 +11,15 @@ import type {
   UnifiedRequest,
 } from "./types";
 import { CATALOG } from "./catalog";
+import { effectivePrompt } from "./prompt";
+
+/** 在占位图上渲染文本，便于离线肉眼验证「图+文」已被合并喂给模型。 */
+function placeholderImage(label: string, seed: string): string {
+  const text = (label || "mock image").slice(0, 60);
+  return `https://placehold.co/512x288/27272a/a1a1aa/png?text=${encodeURIComponent(
+    text
+  )}&seed=${encodeURIComponent(seed)}`;
+}
 
 const SAMPLE_VIDEO =
   "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
@@ -23,10 +32,6 @@ const CAMERA_MOVES = ["固定机位", "缓慢推近", "横移跟随", "升降镜
 /** 模拟视频任务的「生成耗时」，让前端能看到排队→生成→完成的进度（测试可用环境变量调小）。 */
 function mockVideoDurationMs(): number {
   return Number(process.env.LIBTV_MOCK_VIDEO_MS) || 3000;
-}
-
-function imageUrl(seed: string): string {
-  return `https://picsum.photos/seed/${encodeURIComponent(seed)}/512/288`;
 }
 
 function mockShots(prompt: string): ShotRow[] {
@@ -77,10 +82,13 @@ export class MockProvider implements GenerationProvider {
       case "text-to-image":
       case "image-to-image": {
         const count = req.params?.count ?? 1;
-        // 节点目前展示单张；多张时取第一张，但仍按 count 生成不同 seed 以示区分。
+        const refN = req.images?.length ?? 0;
+        // 占位图上直接渲染「合并后的提示词 + 参考图数量」，离线即可肉眼验证图+文已生效。
+        const label =
+          (refN ? `[参考${refN}图] ` : "") + effectivePrompt(req);
         const outputs: GenerationOutput[] = Array.from(
           { length: count },
-          (_, i) => ({ type: "image", url: imageUrl(`${seed}-${i}`) })
+          (_, i) => ({ type: "image", url: placeholderImage(label, `${seed}-${i}`) })
         );
         return { kind: "sync", outputs };
       }

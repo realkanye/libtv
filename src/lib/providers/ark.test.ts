@@ -105,6 +105,24 @@ describe("ArkProvider 请求构造", () => {
     expect(body.size).toBe("2048x1152");
   });
 
+  it("图+文生图：连入的参考文本合并进 prompt，参考图进 image", async () => {
+    process.env.ARK_API_KEY = "test-key";
+    const calls = mockFetch({ data: [{ url: "http://x/i.png" }] });
+    const provider = new ArkProvider();
+    await provider.createTask({
+      providerId: "ark",
+      modelId: "doubao-seedream-4-0",
+      mode: "image-to-image",
+      prompt: "改成夜景",
+      images: ["http://a/ref.png"],
+      refTexts: ["保持人物一致", "电影感打光"],
+      params: { aspectRatio: "1:1", resolution: "2K", count: 1 },
+    });
+    const body = JSON.parse(calls[0].opts.body as string);
+    expect(body.prompt).toBe("改成夜景\n保持人物一致\n电影感打光");
+    expect(body.image).toBe("http://a/ref.png");
+  });
+
   it("Seedance 异步视频：返回上游 task id", async () => {
     process.env.ARK_API_KEY = "test-key";
     const calls = mockFetch({ id: "cgt-123" });

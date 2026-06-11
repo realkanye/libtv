@@ -7,6 +7,7 @@
 
 import { klingConfig } from "@/lib/server/env";
 import { signKlingToken } from "./jwt";
+import { effectivePrompt } from "./prompt";
 import type {
   CreateTaskResult,
   GenerationProvider,
@@ -108,7 +109,7 @@ export class KlingProvider implements GenerationProvider {
 
     const body: Record<string, unknown> = {
       model_name: req.modelId,
-      prompt: req.prompt || undefined,
+      prompt: effectivePrompt(req) || undefined, // 图+文生视频：合并连入文本
       duration: String(req.params?.duration ?? 5),
       aspect_ratio: req.params?.aspectRatio ?? "16:9",
       mode: "std",
@@ -137,7 +138,7 @@ export class KlingProvider implements GenerationProvider {
   private async createImage(req: UnifiedRequest): Promise<CreateTaskResult> {
     const body: Record<string, unknown> = {
       model_name: req.modelId,
-      prompt: req.prompt,
+      prompt: effectivePrompt(req), // 图+文生图：合并连入文本
       aspect_ratio: req.params?.aspectRatio ?? "16:9",
       n: req.params?.count ?? 1,
     };
