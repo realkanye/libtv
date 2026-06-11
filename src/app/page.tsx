@@ -4,7 +4,7 @@ import Canvas from "@/components/Canvas";
 export default function Home() {
   return (
     <main className="flex h-screen flex-col bg-[var(--bg)]">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--bg-elevated)]/60 px-4 backdrop-blur">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--bg-elevated)] px-4">
         <div className="flex items-center gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 text-[13px] font-black text-white shadow-[0_2px_8px_rgba(139,92,246,0.4)]">
             L

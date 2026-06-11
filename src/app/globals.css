@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  /* 强制整个应用为暗色：修正原生控件/滚动条/UA 默认的浅色渲染 */
+  color-scheme: dark;
   /* 专业暗色创作台调色 */
   --bg: #09090b;
   --bg-elevated: #131318;

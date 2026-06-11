@@ -102,7 +102,7 @@ export default function SettingsPage() {
 
   return (
     <main className="min-h-screen bg-[var(--bg)] text-zinc-200">
-      <header className="lib-glass sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-[var(--border)] px-4">
+      <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-[var(--border)] bg-[var(--bg-elevated)] px-4">
         <Link href="/" className="flex items-center gap-2">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 text-[13px] font-black text-white shadow-[0_2px_8px_rgba(139,92,246,0.4)]">
             L
