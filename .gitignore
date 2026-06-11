@@ -13,9 +13,10 @@
 # testing
 /coverage
 
-# LibTV 运行时数据：任务持久化 + 转存的生成产物
+# LibTV 运行时数据：任务持久化 + 转存的生成产物 + 用户上传
 /.data/
 /public/generated/
+/public/uploads/
 
 # next.js
 /.next/

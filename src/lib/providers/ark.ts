@@ -16,8 +16,15 @@ import type {
 import { ProviderError } from "./types";
 import { CATALOG } from "./catalog";
 
+import type { ShotRow } from "@/lib/types";
+
 interface ArkImageResponse {
   data?: { url?: string }[];
+  error?: { code?: string; message?: string };
+}
+
+interface ArkChatResponse {
+  choices?: { message?: { content?: string } }[];
   error?: { code?: string; message?: string };
 }
 
@@ -120,14 +127,55 @@ export class ArkProvider implements GenerationProvider {
     if (req.modelId.includes("seedance")) {
       return arkConfig.seedanceModel() ?? req.modelId;
     }
+    if (req.mode === "text-to-text" || req.mode === "text-to-script") {
+      return arkConfig.llmModel() ?? req.modelId;
+    }
     return req.modelId;
   }
 
   async createTask(req: UnifiedRequest): Promise<CreateTaskResult> {
+    if (req.mode === "text-to-text" || req.mode === "text-to-script") {
+      return this.createChat(req);
+    }
     if (req.modelId.includes("seedream")) {
       return this.createImage(req);
     }
     return this.createVideo(req);
+  }
+
+  /** LLM：文本 / 结构化分镜脚本（chat completions，同步）。 */
+  private async createChat(req: UnifiedRequest): Promise<CreateTaskResult> {
+    const model = this.resolveModelId(req);
+    const isScript = req.mode === "text-to-script";
+    const refBlock = req.refTexts?.length
+      ? `\n\n参考资料：\n${req.refTexts.join("\n---\n")}`
+      : "";
+    const res = await this.post<ArkChatResponse>("/chat/completions", {
+      model,
+      messages: [
+        { role: "system", content: isScript ? SCRIPT_SYSTEM_PROMPT : TEXT_SYSTEM_PROMPT },
+        { role: "user", content: req.prompt + refBlock },
+      ],
+      temperature: 0.7,
+    });
+    const content = res.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new ProviderError("upstream_error", "方舟 LLM 未返回内容");
+    }
+    if (!isScript) {
+      return { kind: "sync", outputs: [{ type: "text", text: content }] };
+    }
+    const shots = parseScriptShots(content);
+    if (!shots.length) {
+      throw new ProviderError(
+        "upstream_error",
+        "分镜脚本解析失败，请重试或调整提示词"
+      );
+    }
+    return {
+      kind: "sync",
+      outputs: [{ type: "script", text: req.prompt, shots }],
+    };
   }
 
   /** Seedream：同步出图，count>1 时并发多次请求。 */
@@ -224,6 +272,43 @@ export class ArkProvider implements GenerationProvider {
     } catch {
       throw new ProviderError("upstream_error", "火山方舟返回了非 JSON 响应");
     }
+  }
+}
+
+const TEXT_SYSTEM_PROMPT =
+  "你是专业的影视创作助手，根据用户需求生成高质量的中文文本（剧情、角色设定、提示词等）。直接输出正文，不要寒暄。";
+
+const SCRIPT_SYSTEM_PROMPT = `你是专业的分镜师。根据用户的剧情描述生成分镜脚本。
+严格输出一个 JSON 数组（不要包裹 markdown 代码块以外的任何文字），数组中每个元素形如：
+{"scene":"场景名","shotType":"景别(远景/全景/中景/近景/特写)","description":"该镜头的详细画面描述(适合直接作为AI绘画提示词)","cameraMove":"运镜方式"}
+生成 4-8 个镜头，保持叙事连贯。`;
+
+/** 纯函数：解析 LLM 输出的分镜 JSON（容忍 markdown 代码块包裹），供契约测试覆盖。 */
+export function parseScriptShots(content: string): ShotRow[] {
+  // 剥掉 ```json ... ``` 围栏，或截取首个 [ 到末个 ] 之间的内容
+  let raw = content.trim();
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) raw = fence[1].trim();
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) return [];
+  try {
+    const arr = JSON.parse(raw.slice(start, end + 1));
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter(
+        (s): s is Record<string, unknown> => !!s && typeof s === "object"
+      )
+      .map((s, i) => ({
+        id: `shot-${i + 1}`,
+        scene: String(s.scene ?? `场景 ${i + 1}`),
+        shotType: String(s.shotType ?? "中景"),
+        description: String(s.description ?? ""),
+        cameraMove: String(s.cameraMove ?? "固定机位"),
+      }))
+      .filter((s) => s.description);
+  } catch {
+    return [];
   }
 }
 

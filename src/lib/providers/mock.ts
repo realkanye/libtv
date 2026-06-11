@@ -89,6 +89,9 @@ export class MockProvider implements GenerationProvider {
       case "keyframe-video":
         // 异步：把开始时间编进 task id，getTask 据此推进进度。
         return { kind: "async", upstreamTaskId: `mock:${Date.now()}` };
+      default:
+        // 校验层保证不会到这里（mock 未声明的模式会被拦截）
+        throw new Error(`MockProvider 不支持模式 ${req.mode}`);
     }
   }
 

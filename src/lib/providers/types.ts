@@ -8,7 +8,7 @@
 import type { NodeKind, ShotRow } from "@/lib/types";
 
 /** 已登记的 Provider 标识。新增 Provider 时在此扩展。 */
-export type ProviderId = "mock" | "ark" | "kling";
+export type ProviderId = "mock" | "ark" | "kling" | "local";
 
 /**
  * 统一生成模式。画布上的「连线语义」最终都会被解析成其中之一，
@@ -22,7 +22,8 @@ export type GenerationMode =
   | "image-to-image" // 多图参考生图
   | "text-to-video"
   | "image-to-video" // 单图首帧
-  | "keyframe-video"; // 首尾帧
+  | "keyframe-video" // 首尾帧
+  | "compose-video"; // 多视频(+音频)拼接合成
 
 /** 某个模式对「输入参考图数量」的要求。 */
 export interface ImageInputSpec {
@@ -59,6 +60,10 @@ export interface ModelCapability {
   sync: boolean;
   /** 各模式对参考图数量的要求；未列出的模式视为不需要图片。 */
   imageInputs?: Partial<Record<GenerationMode, ImageInputSpec>>;
+  /** 各模式对输入视频数量的要求（视频合成用）。 */
+  videoInputs?: Partial<Record<GenerationMode, ImageInputSpec>>;
+  /** 可接入的音频数量上限（如合成时的 BGM 轨），默认 0。 */
+  maxAudioInputs?: number;
   params: ParamSpec;
   /** 可选说明，展示在参数面板里。 */
   note?: string;
@@ -80,6 +85,10 @@ export interface UnifiedRequest {
   prompt: string;
   /** 上游图片节点的内容（URL 或 data URI），顺序有意义（首帧在前，尾帧在后）。 */
   images?: string[];
+  /** 上游视频节点的内容（合成时按连接顺序拼接）。 */
+  videos?: string[];
+  /** 上游音频节点的内容（合成时作为 BGM 轨混入）。 */
+  audios?: string[];
   /** 上游文本/脚本节点的内容，作为提示词增强。 */
   refTexts?: string[];
   params?: GenerationParams;

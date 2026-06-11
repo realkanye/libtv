@@ -1,8 +1,8 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import type { LibNode as LibNodeType } from "@/lib/types";
+import type { LibNode as LibNodeType, ShotRow } from "@/lib/types";
 import { NODE_KIND_META } from "@/lib/types";
 import { useCanvasStore } from "@/lib/store";
 import {
@@ -14,98 +14,110 @@ import {
 import { reconcileParams } from "@/lib/providers/params";
 import { validateAndNormalize } from "@/lib/providers/validate";
 import { useProviderAvailability } from "@/lib/clientProviders";
+import { startGeneration, retryGeneration } from "@/lib/taskClient";
+import { generateShotImages, generateShotVideos } from "@/lib/pipeline";
+import { SLASH_PRESETS } from "@/lib/slashPresets";
 import type { GenerationParams, ModelCapability } from "@/lib/providers/types";
-import type { TaskView } from "@/lib/tasks/types";
 
-const TASK_STATUS_TO_NODE: Record<
-  TaskView["status"],
-  LibNodeType["data"]["status"]
-> = {
-  queued: "queued",
-  running: "generating",
-  succeeded: "done",
-  failed: "error",
-};
+function Spinner({ data }: { data: LibNodeType["data"] }) {
+  return (
+    <div className="flex h-32 flex-col items-center justify-center gap-2 text-xs text-zinc-400">
+      <span className="animate-pulse">
+        {data.status === "queued" ? "排队中…" : `生成中… ${data.progress}%`}
+      </span>
+      {data.status === "generating" && (
+        <div className="h-1 w-3/4 overflow-hidden rounded-full bg-zinc-800">
+          <div
+            className="h-full bg-zinc-400 transition-all"
+            style={{ width: `${Math.max(5, data.progress)}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
-function ContentView({ data }: { data: LibNodeType["data"] }) {
-  if (data.status === "queued" || data.status === "generating") {
-    return (
-      <div className="flex h-32 flex-col items-center justify-center gap-2 text-xs text-zinc-400">
-        <span className="animate-pulse">
-          {data.status === "queued" ? "排队中…" : `生成中… ${data.progress}%`}
-        </span>
-        {data.status === "generating" && (
-          <div className="h-1 w-3/4 overflow-hidden rounded-full bg-zinc-800">
-            <div
-              className="h-full bg-zinc-400 transition-all"
-              style={{ width: `${Math.max(5, data.progress)}%` }}
-            />
-          </div>
-        )}
-      </div>
-    );
-  }
-  if (data.status === "error") {
-    return (
-      <div className="flex min-h-16 items-center justify-center p-2 text-center text-xs text-red-400">
-        {data.errorMessage ?? "生成失败，请重试"}
-      </div>
-    );
-  }
-  if (!data.content && !data.shots) {
-    return (
-      <div className="flex h-20 items-center justify-center text-xs text-zinc-500">
-        输入提示词并点击生成
-      </div>
-    );
-  }
-  switch (data.kind) {
-    case "text":
-      return (
-        <div className="max-h-48 overflow-auto whitespace-pre-wrap p-2 text-xs leading-relaxed text-zinc-200">
-          {data.content}
-        </div>
-      );
-    case "image":
-      return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={data.content!}
-          alt="生成图片"
-          className="w-full rounded-md"
-          draggable={false}
-        />
-      );
-    case "video":
-      return <video src={data.content!} controls className="w-full rounded-md" />;
-    case "audio":
-      return <audio src={data.content!} controls className="w-full" />;
-    case "script":
-      return (
-        <div className="max-h-56 overflow-auto">
-          <table className="w-full text-left text-[11px] text-zinc-300">
-            <thead className="sticky top-0 bg-zinc-800 text-zinc-400">
-              <tr>
-                <th className="p-1.5">场景</th>
-                <th className="p-1.5">景别</th>
-                <th className="p-1.5">画面描述</th>
-                <th className="p-1.5">运镜</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.shots?.map((s) => (
-                <tr key={s.id} className="border-t border-zinc-800">
-                  <td className="p-1.5 whitespace-nowrap">{s.scene}</td>
-                  <td className="p-1.5 whitespace-nowrap">{s.shotType}</td>
-                  <td className="p-1.5">{s.description}</td>
-                  <td className="p-1.5 whitespace-nowrap">{s.cameraMove}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-  }
+/** 脚本分镜表：单元格可编辑 + 行勾选（供批量生成）。 */
+function ShotTable({
+  nodeId,
+  shots,
+  selected,
+  onToggle,
+}: {
+  nodeId: string;
+  shots: ShotRow[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+  const updateShot = (shotId: string, patch: Partial<ShotRow>) => {
+    updateNodeData(nodeId, {
+      shots: shots.map((s) => (s.id === shotId ? { ...s, ...patch } : s)),
+    });
+  };
+  const cellCls =
+    "w-full bg-transparent outline-none focus:bg-zinc-800 rounded px-1 py-0.5";
+  return (
+    <div className="max-h-64 overflow-auto">
+      <table className="w-full text-left text-[11px] text-zinc-300">
+        <thead className="sticky top-0 bg-zinc-800 text-zinc-400">
+          <tr>
+            <th className="w-6 p-1.5"></th>
+            <th className="p-1.5">场景</th>
+            <th className="p-1.5">景别</th>
+            <th className="w-1/2 p-1.5">画面描述</th>
+            <th className="p-1.5">运镜</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shots.map((s) => (
+            <tr key={s.id} className="border-t border-zinc-800 align-top">
+              <td className="p-1.5">
+                <input
+                  type="checkbox"
+                  checked={selected.has(s.id)}
+                  onChange={() => onToggle(s.id)}
+                />
+              </td>
+              <td className="p-1">
+                <input
+                  className={cellCls}
+                  value={s.scene}
+                  onChange={(e) => updateShot(s.id, { scene: e.target.value })}
+                />
+              </td>
+              <td className="p-1">
+                <input
+                  className={cellCls}
+                  value={s.shotType}
+                  onChange={(e) => updateShot(s.id, { shotType: e.target.value })}
+                />
+              </td>
+              <td className="p-1">
+                <textarea
+                  className={`${cellCls} resize-none`}
+                  rows={2}
+                  value={s.description}
+                  onChange={(e) =>
+                    updateShot(s.id, { description: e.target.value })
+                  }
+                />
+              </td>
+              <td className="p-1">
+                <input
+                  className={cellCls}
+                  value={s.cameraMove}
+                  onChange={(e) =>
+                    updateShot(s.id, { cameraMove: e.target.value })
+                  }
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 /** 能力声明驱动的参数控件：模型没声明的参数不会出现。 */
@@ -192,24 +204,30 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
   const nodes = useCanvasStore((s) => s.nodes);
   const availability = useProviderAvailability((s) => s.availability);
   const ensureLoaded = useProviderAvailability((s) => s.ensureLoaded);
-
-  const esRef = useRef<EventSource | null>(null);
-
   useEffect(() => ensureLoaded(), [ensureLoaded]);
 
-  const caps = capabilitiesForKind(data.kind);
-  const cap = findCapability(data.providerId, data.modelId) ?? caps[0];
+  const [editingText, setEditingText] = useState(false);
+  const [textDraft, setTextDraft] = useState("");
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [selectedShots, setSelectedShots] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState<string | null>(null);
 
-  // 连线语义：上游图片数量决定生成模式（文生 / 图生 / 首尾帧）。
+  const caps = capabilitiesForKind(data.kind);
+  const isCompose = data.kind === "video" && data.providerId === "local";
+  const mode = useMemo(() => {
+    const inputs = upstreamInputs(id);
+    return resolveMode(data.kind, inputs.images.length, inputs.videos.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, edges, nodes, data.kind, upstreamInputs]);
+  const cap = findCapability(data.providerId, data.modelId, mode) ?? caps[0];
+
   const inputs = useMemo(
     () => upstreamInputs(id),
-    // edges/nodes 变化时重算，保证连线即时反映
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [id, edges, nodes, upstreamInputs]
   );
-  const mode = resolveMode(data.kind, inputs.images.length);
 
-  // 用同一套校验逻辑做实时连线/参数校验（与服务端一致，单一真相源）。
+  // 与服务端同一套校验，用于实时连线/参数提示
   const validation = useMemo(
     () =>
       validateAndNormalize({
@@ -218,6 +236,8 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
         mode,
         prompt: data.prompt,
         images: inputs.images,
+        videos: inputs.videos,
+        audios: inputs.audios,
         refTexts: inputs.refTexts,
         params: data.params,
       }),
@@ -226,95 +246,24 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
 
   const busy = data.status === "queued" || data.status === "generating";
   const canGenerate = validation.ok && !busy;
-  // 仅当问题不是「提示词为空」时才提示，避免一进来就报错。
   const hint =
     !validation.ok && validation.message !== "请输入提示词"
       ? validation.message
       : null;
 
-  const closeStream = () => {
-    esRef.current?.close();
-    esRef.current = null;
-  };
-
-  const applyView = (view: TaskView) => {
-    const patch: Partial<LibNodeType["data"]> = {
-      status: TASK_STATUS_TO_NODE[view.status],
-      progress: view.progress,
-    };
-    if (view.status === "succeeded") {
-      const out = view.outputs[0];
-      if (out) {
-        patch.content = out.url ?? out.text ?? null;
-        patch.shots = out.shots ?? null;
-      }
-      closeStream();
-    } else if (view.status === "failed") {
-      patch.errorMessage = view.error?.message ?? "生成失败";
-      closeStream();
-    }
-    updateNodeData(id, patch);
-  };
-
-  const subscribe = (taskId: string) => {
-    closeStream();
-    const es = new EventSource(`/api/tasks/${taskId}/stream`);
-    esRef.current = es;
-    es.onmessage = (ev) => {
-      try {
-        applyView(JSON.parse(ev.data) as TaskView);
-      } catch {
-        /* 忽略心跳/解析异常 */
-      }
-    };
-    es.addEventListener("notfound", () => {
-      updateNodeData(id, { status: "error", errorMessage: "任务不存在或已过期" });
-      closeStream();
-    });
-  };
-
-  const generate = async () => {
-    if (!canGenerate) return;
-    updateNodeData(id, { status: "queued", progress: 0, errorMessage: null });
-    try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nodeId: id,
-          providerId: data.providerId,
-          modelId: data.modelId,
-          mode,
-          prompt: data.prompt,
-          images: inputs.images,
-          refTexts: inputs.refTexts,
-          params: data.params,
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        updateNodeData(id, {
-          status: "error",
-          errorMessage: body.error ?? `请求失败（${res.status}）`,
-        });
-        return;
-      }
-      updateNodeData(id, { taskId: body.taskId });
-      subscribe(body.taskId);
-    } catch {
-      updateNodeData(id, { status: "error", errorMessage: "网络错误，请重试" });
-    }
-  };
-
-  // 刷新 / 重连恢复：若存在进行中的任务则重新订阅。组件卸载时关闭连接。
-  useEffect(() => {
-    if (data.taskId && (data.status === "queued" || data.status === "generating")) {
-      subscribe(data.taskId);
-    }
-    return () => closeStream();
-    // 仅在挂载时尝试恢复
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // 合成节点展示的上游片段顺序（与生成时一致：连接顺序）
+  const composeList = useMemo(() => {
+    if (!isCompose) return [];
+    return edges
+      .filter((e) => e.target === id)
+      .map((e) => nodes.find((n) => n.id === e.source))
+      .filter((n): n is LibNodeType => !!n)
+      .map((n) => ({
+        id: n.id,
+        kind: n.data.kind,
+        ready: n.data.status === "done" && !!n.data.content,
+      }));
+  }, [isCompose, edges, nodes, id]);
 
   const onModelChange = (key: string) => {
     const next = caps.find((c) => capabilityKey(c) === key);
@@ -326,11 +275,157 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
     });
   };
 
+  const onPromptChange = (value: string) => {
+    updateNodeData(id, { prompt: value });
+    setSlashOpen(
+      data.kind === "image" && inputs.images.length > 0 && value.startsWith("/")
+    );
+  };
+
+  const slashFiltered = useMemo(() => {
+    if (!slashOpen) return [];
+    const q = data.prompt.slice(1).trim().toLowerCase();
+    return SLASH_PRESETS.filter(
+      (p) => !q || p.label.toLowerCase().includes(q) || p.key.includes(q)
+    );
+  }, [slashOpen, data.prompt]);
+
+  const runBatch = async (
+    label: string,
+    fn: (id: string, shots?: string[]) => Promise<[number, number]>
+  ) => {
+    if (batchBusy) return;
+    setBatchBusy(label);
+    try {
+      await fn(id, selectedShots.size ? [...selectedShots] : undefined);
+    } finally {
+      setBatchBusy(null);
+    }
+  };
+
+  const renderContent = () => {
+    if (data.status === "queued" || data.status === "generating") {
+      return <Spinner data={data} />;
+    }
+    if (data.status === "error") {
+      return (
+        <div className="flex min-h-16 items-center justify-center p-2 text-center text-xs text-red-400">
+          {data.errorMessage ?? "生成失败，请重试"}
+        </div>
+      );
+    }
+    if (data.kind === "text" && editingText) {
+      return (
+        <div className="nodrag p-1">
+          <textarea
+            autoFocus
+            value={textDraft}
+            onChange={(e) => setTextDraft(e.target.value)}
+            rows={6}
+            className="w-full resize-none rounded-md bg-zinc-800 p-2 text-xs text-zinc-200 outline-none"
+            placeholder="输入文本内容…"
+          />
+          <div className="mt-1 flex justify-end gap-2">
+            <button
+              className="rounded-md px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800"
+              onClick={() => setEditingText(false)}
+            >
+              取消
+            </button>
+            <button
+              className="rounded-md bg-blue-600 px-2 py-0.5 text-[11px] text-white"
+              onClick={() => {
+                updateNodeData(id, {
+                  content: textDraft.trim() || null,
+                  status: textDraft.trim() ? "done" : "idle",
+                });
+                setEditingText(false);
+              }}
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (!data.content && !data.shots) {
+      return (
+        <div className="flex h-20 flex-col items-center justify-center gap-1 text-xs text-zinc-500">
+          <span>
+            {isCompose ? "连入视频后点击「合成」" : "输入提示词并点击生成"}
+          </span>
+          {data.kind === "text" && (
+            <button
+              className="nodrag rounded-md border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800"
+              onClick={() => {
+                setTextDraft("");
+                setEditingText(true);
+              }}
+            >
+              ✍️ 自己编写内容
+            </button>
+          )}
+        </div>
+      );
+    }
+    switch (data.kind) {
+      case "text":
+        return (
+          <div className="group relative">
+            <div className="max-h-48 overflow-auto whitespace-pre-wrap p-2 text-xs leading-relaxed text-zinc-200">
+              {data.content}
+            </div>
+            <button
+              className="nodrag absolute right-1 top-1 hidden rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 group-hover:block"
+              onClick={() => {
+                setTextDraft(data.content ?? "");
+                setEditingText(true);
+              }}
+            >
+              编辑
+            </button>
+          </div>
+        );
+      case "image":
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={data.content!}
+            alt="生成图片"
+            className="w-full rounded-md"
+            draggable={false}
+          />
+        );
+      case "video":
+        return (
+          <video src={data.content!} controls className="w-full rounded-md" />
+        );
+      case "audio":
+        return <audio src={data.content!} controls className="w-full" />;
+      case "script":
+        return (
+          <ShotTable
+            nodeId={id}
+            shots={data.shots ?? []}
+            selected={selectedShots}
+            onToggle={(shotId) =>
+              setSelectedShots((prev) => {
+                const next = new Set(prev);
+                if (next.has(shotId)) next.delete(shotId);
+                else next.add(shotId);
+                return next;
+              })
+            }
+          />
+        );
+    }
+  };
+
   return (
     <div
       className={`rounded-xl border bg-zinc-900/95 shadow-lg backdrop-blur transition-shadow ${
         selected ? "shadow-xl" : ""
-      } ${data.kind === "script" ? "w-[420px]" : "w-72"}`}
+      } ${data.kind === "script" ? "w-[480px]" : "w-72"}`}
       style={{ borderColor: selected ? meta.accent : "#3f3f46" }}
     >
       <Handle
@@ -344,35 +439,102 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
         style={{ background: `${meta.accent}26` }}
       >
         <span>{meta.icon}</span>
-        <span>{meta.label}节点</span>
-        <span className="ml-auto text-[10px] text-zinc-400">{cap.label}</span>
+        <span>{isCompose ? "视频合成" : `${meta.label}节点`}</span>
+        <span className="ml-auto truncate text-[10px] text-zinc-400">
+          {cap.label}
+        </span>
       </div>
 
       <div className="p-2">
-        <ContentView data={data} />
+        {renderContent()}
         {data.status === "error" && (
           <button
-            onClick={generate}
-            disabled={!validation.ok}
-            className="mt-1 w-full rounded-md border border-zinc-700 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            onClick={() => void retryGeneration(id)}
+            className="nodrag mt-1 w-full rounded-md border border-zinc-700 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800"
           >
             重试
           </button>
         )}
+        {/* 脚本流水线：生成分镜图 / 批量生成视频 */}
+        {data.kind === "script" && (data.shots?.length ?? 0) > 0 && (
+          <div className="nodrag mt-1.5 flex gap-2">
+            <button
+              disabled={!!batchBusy}
+              onClick={() => void runBatch("images", generateShotImages)}
+              className="flex-1 rounded-md bg-violet-600/80 py-1 text-[11px] font-medium text-white hover:bg-violet-600 disabled:opacity-40"
+            >
+              {batchBusy === "images" ? "分镜图生成中…" : "🖼️ 生成分镜图"}
+            </button>
+            <button
+              disabled={!!batchBusy}
+              onClick={() => void runBatch("videos", generateShotVideos)}
+              className="flex-1 rounded-md bg-amber-600/80 py-1 text-[11px] font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+            >
+              {batchBusy === "videos" ? "视频生成中…" : "🎥 批量生成视频"}
+            </button>
+          </div>
+        )}
+        {data.kind === "script" && (data.shots?.length ?? 0) > 0 && (
+          <div className="mt-1 text-center text-[10px] text-zinc-500">
+            {selectedShots.size
+              ? `已勾选 ${selectedShots.size} 个分镜`
+              : "未勾选则处理全部分镜"}
+          </div>
+        )}
+        {/* 合成节点：展示拼接顺序 */}
+        {isCompose && composeList.length > 0 && (
+          <div className="mt-1.5 space-y-1">
+            {composeList.map((c, i) => (
+              <div
+                key={c.id}
+                className="flex items-center gap-2 rounded-md bg-zinc-800/60 px-2 py-1 text-[10px] text-zinc-400"
+              >
+                <span className="text-zinc-500">{i + 1}.</span>
+                <span>{c.kind === "audio" ? "🎵 BGM 音轨" : `🎞️ 片段`}</span>
+                <span className="ml-auto">{c.ready ? "✓ 就绪" : "⏳ 未就绪"}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="nodrag border-t border-zinc-800 p-2">
-        <textarea
-          value={data.prompt}
-          onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
-          placeholder={
-            data.kind === "script"
-              ? "描述剧情，生成分镜脚本…"
-              : `输入${meta.label}生成提示词…`
-          }
-          rows={2}
-          className="w-full resize-none rounded-md bg-zinc-800 p-2 text-xs text-zinc-200 outline-none placeholder:text-zinc-500 focus:ring-1"
-        />
+        {!isCompose && (
+          <div className="relative">
+            <textarea
+              value={data.prompt}
+              onChange={(e) => onPromptChange(e.target.value)}
+              onBlur={() => setTimeout(() => setSlashOpen(false), 200)}
+              placeholder={
+                data.kind === "script"
+                  ? "描述剧情，生成分镜脚本…"
+                  : data.kind === "image" && inputs.images.length > 0
+                    ? "输入提示词，或输入 / 唤出快捷指令…"
+                    : `输入${meta.label}生成提示词…`
+              }
+              rows={2}
+              className="w-full resize-none rounded-md bg-zinc-800 p-2 text-xs text-zinc-200 outline-none placeholder:text-zinc-500 focus:ring-1"
+            />
+            {slashOpen && slashFiltered.length > 0 && (
+              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-full overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl">
+                {slashFiltered.map((p) => (
+                  <button
+                    key={p.key}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      updateNodeData(id, { prompt: p.prompt });
+                      setSlashOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-zinc-200 hover:bg-zinc-800"
+                  >
+                    <span>{p.icon}</span>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <ParamControls
           cap={cap}
@@ -395,8 +557,6 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
             className="flex-1 rounded-md bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300 outline-none"
           >
             {caps.map((c) => {
-              const configured =
-                c.providerId === "mock" || availability[c.providerId];
               const unavailable = availability[c.providerId] === false;
               return (
                 <option
@@ -405,18 +565,18 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
                   disabled={unavailable}
                 >
                   {c.label}
-                  {unavailable ? "（未配置）" : configured ? "" : ""}
+                  {unavailable ? "（未配置）" : ""}
                 </option>
               );
             })}
           </select>
           <button
-            onClick={generate}
+            onClick={() => void startGeneration(id)}
             disabled={!canGenerate}
             className="rounded-md px-3 py-1 text-[11px] font-medium text-white transition-opacity disabled:opacity-40"
             style={{ background: meta.accent }}
           >
-            {busy ? "生成中" : "生成"}
+            {busy ? (isCompose ? "合成中" : "生成中") : isCompose ? "合成" : "生成"}
           </button>
         </div>
       </div>

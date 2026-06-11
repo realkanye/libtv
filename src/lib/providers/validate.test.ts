@@ -84,6 +84,69 @@ describe("validateAndNormalize", () => {
     if (!r.ok) expect(r.message).toContain("时长");
   });
 
+  it("视频合成：至少两个视频，音频最多一条", () => {
+    const tooFew = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-compose",
+      mode: "compose-video",
+      prompt: "",
+      videos: ["/uploads/a.mp4"],
+    });
+    expect(tooFew.ok).toBe(false);
+
+    const ok = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-compose",
+      mode: "compose-video",
+      prompt: "",
+      videos: ["/uploads/a.mp4", "/uploads/b.mp4"],
+      audios: ["/uploads/bgm.mp3"],
+    });
+    expect(ok.ok).toBe(true);
+
+    const tooManyAudio = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-compose",
+      mode: "compose-video",
+      prompt: "",
+      videos: ["/a.mp4", "/b.mp4"],
+      audios: ["/1.mp3", "/2.mp3"],
+    });
+    expect(tooManyAudio.ok).toBe(false);
+  });
+
+  it("非合成模型拒绝视频输入", () => {
+    const r = validateAndNormalize({
+      providerId: "kling",
+      modelId: "kling-v2-5-turbo",
+      mode: "text-to-video",
+      prompt: "x",
+      videos: ["/uploads/a.mp4"],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toContain("不支持视频输入");
+  });
+
+  it("同一模型按模式区分能力条目（方舟 LLM 文本/脚本）", () => {
+    const text = validateAndNormalize({
+      providerId: "ark",
+      modelId: "doubao-seed-1-6-251015",
+      mode: "text-to-text",
+      prompt: "你好",
+    });
+    expect(text.ok).toBe(true);
+    if (text.ok) expect(text.capability.kind).toBe("text");
+
+    const script = validateAndNormalize({
+      providerId: "ark",
+      modelId: "doubao-seed-1-6-251015",
+      mode: "text-to-script",
+      prompt: "一个故事",
+    });
+    expect(script.ok).toBe(true);
+    if (script.ok) expect(script.capability.kind).toBe("script");
+  });
+
   it("裁掉模型未声明的参数", () => {
     const r = validateAndNormalize({
       providerId: "mock",

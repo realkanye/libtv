@@ -5,11 +5,13 @@ import type { GenerationProvider, ProviderId } from "./types";
 import { MockProvider } from "./mock";
 import { ArkProvider } from "./ark";
 import { KlingProvider } from "./kling";
+import { LocalProvider } from "./local";
 
 const providers: Record<ProviderId, GenerationProvider> = {
   mock: new MockProvider(),
   ark: new ArkProvider(),
   kling: new KlingProvider(),
+  local: new LocalProvider(),
 };
 
 export function getProvider(id: ProviderId): GenerationProvider {

@@ -17,10 +17,11 @@ const MODE_LABELS: Record<GenerationMode, string> = {
   "text-to-video": "文生视频",
   "image-to-video": "图生视频（首帧）",
   "keyframe-video": "首尾帧视频",
+  "compose-video": "视频合成",
 };
 
 const envelopeSchema = z.object({
-  providerId: z.enum(["mock", "ark", "kling"]),
+  providerId: z.enum(["mock", "ark", "kling", "local"]),
   modelId: z.string().min(1),
   mode: z.enum([
     "text-to-text",
@@ -31,9 +32,12 @@ const envelopeSchema = z.object({
     "text-to-video",
     "image-to-video",
     "keyframe-video",
+    "compose-video",
   ]),
   prompt: z.string(),
   images: z.array(z.string()).optional(),
+  videos: z.array(z.string()).optional(),
+  audios: z.array(z.string()).optional(),
   refTexts: z.array(z.string()).optional(),
   params: z.record(z.string(), z.unknown()).optional(),
 });
@@ -66,7 +70,7 @@ export function validateAndNormalize(input: unknown): ValidationResult {
   }
   const req = parsed.data;
 
-  const capability = findCapability(req.providerId, req.modelId);
+  const capability = findCapability(req.providerId, req.modelId, req.mode);
   if (!capability) {
     return fail(`未找到模型「${req.modelId}」`);
   }
@@ -102,13 +106,39 @@ export function validateAndNormalize(input: unknown): ValidationResult {
     }
   }
 
-  // 3) 提示词：文生类必填
+  // 3) 视频/音频输入校验（视频合成用）
+  const videos = (req.videos ?? []).filter((s) => s && s.trim());
+  const audios = (req.audios ?? []).filter((s) => s && s.trim());
+  if (req.mode === "compose-video") {
+    const spec = capability.videoInputs?.[req.mode];
+    if (!spec) {
+      return fail(`「${capability.label}」未声明视频合成的输入要求`);
+    }
+    if (videos.length < spec.min) {
+      return fail(`视频合成需要连入至少 ${spec.min} 个视频，当前 ${videos.length} 个`);
+    }
+    if (videos.length > spec.max) {
+      return fail(`视频合成最多接入 ${spec.max} 个视频，当前 ${videos.length} 个`);
+    }
+  } else if (videos.length > 0) {
+    return fail(`「${capability.label}」不支持视频输入，请断开视频连线或改用视频合成`);
+  }
+  const maxAudio = capability.maxAudioInputs ?? 0;
+  if (audios.length > maxAudio) {
+    return fail(
+      maxAudio === 0
+        ? `「${capability.label}」不支持音频输入，请断开音频连线`
+        : `「${capability.label}」最多接入 ${maxAudio} 条音频，当前 ${audios.length} 条`
+    );
+  }
+
+  // 4) 提示词：文生类必填（合成无需提示词）
   const prompt = req.prompt.trim();
-  if (!needsImages(req.mode) && !prompt) {
+  if (!needsImages(req.mode) && req.mode !== "compose-video" && !prompt) {
     return fail("请输入提示词");
   }
 
-  // 4) 参数归一化（只保留模型声明的参数，并校验取值）
+  // 5) 参数归一化（只保留模型声明的参数，并校验取值）
   const rawParams = (req.params ?? {}) as Record<string, unknown>;
   const params: GenerationParams = {};
   const spec = capability.params;
@@ -152,6 +182,8 @@ export function validateAndNormalize(input: unknown): ValidationResult {
     mode: req.mode,
     prompt,
     images: needsImages(req.mode) ? images : undefined,
+    videos: req.mode === "compose-video" ? videos : undefined,
+    audios: audios.length ? audios : undefined,
     refTexts: req.refTexts?.filter((s) => s && s.trim()),
     params,
   };

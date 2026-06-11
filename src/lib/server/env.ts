@@ -14,6 +14,7 @@ export const arkConfig = {
   /** 允许用环境变量切换模型 ID（如升级到 Seedance 2.0）。 */
   seedanceModel: () => read("ARK_SEEDANCE_MODEL"),
   seedreamModel: () => read("ARK_SEEDREAM_MODEL"),
+  llmModel: () => read("ARK_LLM_MODEL"),
 };
 
 export const klingConfig = {

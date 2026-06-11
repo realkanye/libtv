@@ -4,6 +4,7 @@ import {
   arkImageSize,
   arkVideoPromptFlags,
   mapArkTaskState,
+  parseScriptShots,
 } from "./ark";
 import type { UnifiedRequest } from "./types";
 
@@ -41,6 +42,27 @@ describe("arkVideoPromptFlags", () => {
       params: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
     } as UnifiedRequest;
     expect(arkVideoPromptFlags(req)).toBe(" --ratio 16:9 --duration 5 --resolution 720p");
+  });
+});
+
+describe("parseScriptShots", () => {
+  it("解析裸 JSON 数组", () => {
+    const shots = parseScriptShots(
+      '[{"scene":"a","shotType":"全景","description":"画面","cameraMove":"固定"}]'
+    );
+    expect(shots).toHaveLength(1);
+    expect(shots[0].id).toBe("shot-1");
+  });
+  it("容忍代码块围栏与前后废话", () => {
+    const shots = parseScriptShots(
+      '好的，以下是分镜：\n```json\n[{"scene":"a","description":"x"},{"scene":"b","description":"y"}]\n```\n希望有帮助'
+    );
+    expect(shots).toHaveLength(2);
+    expect(shots[1].shotType).toBe("中景"); // 缺省值
+  });
+  it("非法输入返回空数组", () => {
+    expect(parseScriptShots("完全不是 JSON")).toEqual([]);
+    expect(parseScriptShots('{"not":"array"}')).toEqual([]);
   });
 });
 
@@ -104,6 +126,57 @@ describe("ArkProvider 请求构造", () => {
       type: "image_url",
       image_url: { url: "http://a/first.png" },
     });
+  });
+
+  it("LLM 文生文：POST /chat/completions，refTexts 拼入用户消息", async () => {
+    process.env.ARK_API_KEY = "test-key";
+    const calls = mockFetch({
+      choices: [{ message: { content: "生成的剧情文本" } }],
+    });
+    const provider = new ArkProvider();
+    const result = await provider.createTask({
+      providerId: "ark",
+      modelId: "doubao-seed-1-6-251015",
+      mode: "text-to-text",
+      prompt: "写一段开场",
+      refTexts: ["世界观设定：赛博朋克"],
+      params: {},
+    });
+    expect(result.kind).toBe("sync");
+    if (result.kind === "sync") {
+      expect(result.outputs[0]).toEqual({ type: "text", text: "生成的剧情文本" });
+    }
+    expect(calls[0].url).toContain("/chat/completions");
+    const body = JSON.parse(calls[0].opts.body as string);
+    expect(body.messages[1].content).toContain("赛博朋克");
+  });
+
+  it("LLM 文生分镜：解析 JSON 输出为分镜行", async () => {
+    process.env.ARK_API_KEY = "test-key";
+    mockFetch({
+      choices: [
+        {
+          message: {
+            content:
+              '```json\n[{"scene":"码头","shotType":"远景","description":"夜晚的码头","cameraMove":"缓慢推近"}]\n```',
+          },
+        },
+      ],
+    });
+    const provider = new ArkProvider();
+    const result = await provider.createTask({
+      providerId: "ark",
+      modelId: "doubao-seed-1-6-251015",
+      mode: "text-to-script",
+      prompt: "码头故事",
+      params: {},
+    });
+    expect(result.kind).toBe("sync");
+    if (result.kind === "sync") {
+      expect(result.outputs[0].type).toBe("script");
+      expect(result.outputs[0].shots).toHaveLength(1);
+      expect(result.outputs[0].shots![0].scene).toBe("码头");
+    }
   });
 
   it("鉴权失败映射为 auth_failed", async () => {

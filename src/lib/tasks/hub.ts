@@ -18,6 +18,33 @@ import type {
 import { getTaskStore, type TaskStore } from "./store";
 import { isTerminal, toView, type TaskRecord, type TaskView } from "./types";
 import { localizeOutputs } from "./assets";
+import { readFile } from "node:fs/promises";
+import { join, extname } from "node:path";
+
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+};
+
+/** 把请求里的本地相对地址（/uploads、/generated）图片读成 data URI。 */
+async function materializeLocalImages(
+  req: UnifiedRequest
+): Promise<UnifiedRequest> {
+  if (!req.images?.some((u) => u.startsWith("/"))) return req;
+  const images = await Promise.all(
+    req.images.map(async (url) => {
+      if (!url.startsWith("/")) return url;
+      const path = join(process.cwd(), "public", url.replace(/^\/+/, ""));
+      const buf = await readFile(path);
+      const mime = MIME_BY_EXT[extname(path).toLowerCase()] ?? "image/png";
+      return `data:${mime};base64,${buf.toString("base64")}`;
+    })
+  );
+  return { ...req, images };
+}
 
 const TICK_MS = 700; // 轮询器节拍
 const POLL_BASE_MS = 1000; // 退避基数
@@ -65,7 +92,13 @@ export class TaskHub {
   private async runCreate(task: TaskRecord) {
     const provider = getProvider(task.providerId);
     try {
-      const result = await provider.createTask(task.request);
+      // 远程 Provider 无法访问本服务的相对地址（/uploads、/generated），
+      // 发送前把本地图片读成 data URI；本地合成 Provider 自己处理文件路径。
+      const request =
+        provider.id === "local"
+          ? task.request
+          : await materializeLocalImages(task.request);
+      const result = await provider.createTask(request);
       const current = this.store.get(task.id);
       if (!current || isTerminal(current.status)) return; // 可能已被重试/清理
       if (result.kind === "sync") {

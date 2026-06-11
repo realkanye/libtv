@@ -29,6 +29,12 @@ export interface LibNodeData extends Record<string, unknown> {
   errorMessage: string | null;
   /** 当前关联的任务 ID（用于订阅状态流 / 刷新恢复）。 */
   taskId: string | null;
+  /** 脚本节点：分镜 → 已生成的分镜图节点 ID 映射（流水线复用，避免重复建节点）。 */
+  shotImageNodes?: Record<string, string>;
+  /** 脚本节点：分镜 → 已生成的视频节点 ID 映射。 */
+  shotVideoNodes?: Record<string, string>;
+  /** 由哪个分镜生成（分镜图/视频节点上回链）。 */
+  sourceShotId?: string;
 }
 
 export type LibNode = Node<LibNodeData>;

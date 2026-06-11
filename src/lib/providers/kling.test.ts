@@ -91,6 +91,37 @@ describe("KlingProvider 请求构造", () => {
     expect(body.image_tail).toBe("http://a/last.png");
   });
 
+  it("生图走 /v1/images/generations，查询路径区分 images 端点", async () => {
+    withKeys();
+    const calls = mockFetch({ code: 0, data: { task_id: "img1" } });
+    const provider = new KlingProvider();
+    const result = await provider.createTask({
+      providerId: "kling",
+      modelId: "kling-v2",
+      mode: "image-to-image",
+      prompt: "改成夜景",
+      images: ["data:image/png;base64,QUJD"],
+      params: { aspectRatio: "16:9", count: 2 },
+    });
+    expect(result).toEqual({ kind: "async", upstreamTaskId: "images:img1" });
+    expect(calls[0].url).toContain("/v1/images/generations");
+    const body = JSON.parse(calls[0].opts.body as string);
+    expect(body.image).toBe("QUJD"); // data URI 已剥成 base64
+    expect(body.n).toBe(2);
+
+    // 查询
+    mockFetch({
+      code: 0,
+      data: {
+        task_status: "succeed",
+        task_result: { images: [{ index: 0, url: "http://img/1.png" }] },
+      },
+    });
+    const state = await provider.getTask("images:img1");
+    expect(state.status).toBe("succeeded");
+    expect(state.outputs?.[0]).toEqual({ type: "image", url: "http://img/1.png" });
+  });
+
   it("业务码非 0 时按错误码映射", async () => {
     withKeys();
     mockFetch({ code: 1301, message: "risk" });

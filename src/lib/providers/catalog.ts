@@ -75,6 +75,26 @@ export const CATALOG: ModelCapability[] = [
   // ───────────── 火山方舟（即梦 / 字节）─────────────
   {
     providerId: "ark",
+    modelId: "doubao-seed-1-6-251015",
+    label: "豆包 Seed 1.6（方舟）",
+    kind: "text",
+    modes: ["text-to-text"],
+    sync: true,
+    params: {},
+    note: "火山方舟大语言模型，复用 ARK_API_KEY",
+  },
+  {
+    providerId: "ark",
+    modelId: "doubao-seed-1-6-251015",
+    label: "豆包 Seed 1.6（方舟）",
+    kind: "script",
+    modes: ["text-to-script"],
+    sync: true,
+    params: {},
+    note: "生成结构化分镜脚本，复用 ARK_API_KEY",
+  },
+  {
+    providerId: "ark",
     modelId: "doubao-seedream-4-0",
     label: "Seedream 4.0（即梦）",
     kind: "image",
@@ -107,6 +127,20 @@ export const CATALOG: ModelCapability[] = [
   // ───────────── 可灵（快手 Kling）─────────────
   {
     providerId: "kling",
+    modelId: "kling-v2",
+    label: "Kling 图像（可灵）",
+    kind: "image",
+    modes: ["text-to-image", "image-to-image"],
+    sync: false, // 可灵生图也是异步任务
+    imageInputs: { "image-to-image": { min: 1, max: 1 } },
+    params: {
+      aspectRatio: { options: ["16:9", "9:16", "1:1", "4:3", "3:4"], default: "16:9" },
+      count: { options: [1, 2, 4], default: 1 },
+    },
+    note: "可灵开放平台生图（异步任务，单图垫图参考）",
+  },
+  {
+    providerId: "kling",
     modelId: "kling-v2-5-turbo",
     label: "Kling v2.5 Turbo（可灵）",
     kind: "video",
@@ -122,6 +156,22 @@ export const CATALOG: ModelCapability[] = [
     },
     note: "可灵开放平台异步任务（JWT 鉴权）",
   },
+
+  // ───────────── 本地（ffmpeg 视频合成）─────────────
+  {
+    providerId: "local",
+    modelId: "ffmpeg-compose",
+    label: "视频合成（本地 ffmpeg）",
+    kind: "video",
+    modes: ["compose-video"],
+    sync: false,
+    videoInputs: { "compose-video": { min: 2, max: 20 } },
+    maxAudioInputs: 1,
+    params: {
+      resolution: { options: ["720p", "1080p"], default: "720p" },
+    },
+    note: "多视频片段按连接顺序拼接，可混入一条 BGM 音轨",
+  },
 ];
 
 /** 稳定的能力键，用作前端下拉的 value 与节点存储。 */
@@ -132,13 +182,23 @@ export function capabilityKey(c: {
   return `${c.providerId}:${c.modelId}`;
 }
 
+/**
+ * 查找能力声明。同一上游模型可能按节点类型登记多条（如方舟 LLM 同时服务
+ * 文本与脚本节点），传入 mode 时优先返回支持该模式的条目。
+ */
 export function findCapability(
   providerId: ProviderId,
-  modelId: string
+  modelId: string,
+  mode?: GenerationMode
 ): ModelCapability | undefined {
-  return CATALOG.find(
+  const matches = CATALOG.filter(
     (c) => c.providerId === providerId && c.modelId === modelId
   );
+  if (mode) {
+    const exact = matches.find((c) => c.modes.includes(mode));
+    if (exact) return exact;
+  }
+  return matches[0];
 }
 
 export function findCapabilityByKey(key: string): ModelCapability | undefined {
@@ -158,10 +218,14 @@ export function defaultCapabilityForKind(kind: NodeKind): ModelCapability {
 }
 
 /**
- * 根据「连入的参考图数量」推导生成模式。
- * 连线语义：图片连视频=图生视频(首帧)；两张图=首尾帧；纯文本=文生。
+ * 根据「连入的参考内容」推导生成模式。
+ * 连线语义：图片连视频=图生视频(首帧)；两张图=首尾帧；视频连视频=合成；纯文本=文生。
  */
-export function resolveMode(kind: NodeKind, imageCount: number): GenerationMode {
+export function resolveMode(
+  kind: NodeKind,
+  imageCount: number,
+  videoCount = 0
+): GenerationMode {
   switch (kind) {
     case "text":
       return "text-to-text";
@@ -172,6 +236,7 @@ export function resolveMode(kind: NodeKind, imageCount: number): GenerationMode 
     case "image":
       return imageCount >= 1 ? "image-to-image" : "text-to-image";
     case "video":
+      if (videoCount >= 1) return "compose-video";
       if (imageCount >= 2) return "keyframe-video";
       if (imageCount === 1) return "image-to-video";
       return "text-to-video";

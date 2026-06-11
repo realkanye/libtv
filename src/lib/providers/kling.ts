@@ -17,7 +17,7 @@ import type {
 import { ProviderError } from "./types";
 import { CATALOG } from "./catalog";
 
-type KlingEndpoint = "text2video" | "image2video";
+type KlingEndpoint = "text2video" | "image2video" | "images";
 
 interface KlingCreateResponse {
   code?: number;
@@ -32,7 +32,10 @@ interface KlingQueryResponse {
     task_id?: string;
     task_status?: string; // submitted | processing | succeed | failed
     task_status_msg?: string;
-    task_result?: { videos?: { id?: string; url?: string }[] };
+    task_result?: {
+      videos?: { id?: string; url?: string }[];
+      images?: { index?: number; url?: string }[];
+    };
   };
 }
 
@@ -97,6 +100,9 @@ export class KlingProvider implements GenerationProvider {
   }
 
   async createTask(req: UnifiedRequest): Promise<CreateTaskResult> {
+    if (req.mode === "text-to-image" || req.mode === "image-to-image") {
+      return this.createImage(req);
+    }
     const endpoint: KlingEndpoint =
       req.mode === "text-to-video" ? "text2video" : "image2video";
 
@@ -125,12 +131,36 @@ export class KlingProvider implements GenerationProvider {
     return { kind: "async", upstreamTaskId: `${endpoint}:${taskId}` };
   }
 
+  /** 可灵生图（异步任务）。 */
+  private async createImage(req: UnifiedRequest): Promise<CreateTaskResult> {
+    const body: Record<string, unknown> = {
+      model_name: req.modelId,
+      prompt: req.prompt,
+      aspect_ratio: req.params?.aspectRatio ?? "16:9",
+      n: req.params?.count ?? 1,
+    };
+    if (req.images?.[0]) {
+      body.image = klingImageField(req.images[0]);
+    }
+    const res = await this.post<KlingCreateResponse>(
+      "/v1/images/generations",
+      body
+    );
+    const taskId = res.data?.task_id;
+    if (!taskId) {
+      throw new ProviderError("upstream_error", "可灵未返回 task_id");
+    }
+    return { kind: "async", upstreamTaskId: `images:${taskId}` };
+  }
+
   async getTask(upstreamTaskId: string): Promise<ProviderTaskState> {
     const [endpoint, ...rest] = upstreamTaskId.split(":");
     const taskId = rest.join(":");
-    const res = await this.get<KlingQueryResponse>(
-      `/v1/videos/${endpoint}/${encodeURIComponent(taskId)}`
-    );
+    const path =
+      endpoint === "images"
+        ? `/v1/images/generations/${encodeURIComponent(taskId)}`
+        : `/v1/videos/${endpoint}/${encodeURIComponent(taskId)}`;
+    const res = await this.get<KlingQueryResponse>(path);
     return mapKlingTaskState(res);
   }
 
@@ -184,14 +214,21 @@ export class KlingProvider implements GenerationProvider {
 export function mapKlingTaskState(res: KlingQueryResponse): ProviderTaskState {
   const status = res.data?.task_status;
   if (status === "succeed") {
-    const url = res.data?.task_result?.videos?.[0]?.url;
-    if (!url) {
+    const result = res.data?.task_result;
+    const videoOutputs = (result?.videos ?? [])
+      .filter((v) => v.url)
+      .map((v) => ({ type: "video" as const, url: v.url! }));
+    const imageOutputs = (result?.images ?? [])
+      .filter((i) => i.url)
+      .map((i) => ({ type: "image" as const, url: i.url! }));
+    const outputs = [...videoOutputs, ...imageOutputs];
+    if (!outputs.length) {
       return {
         status: "failed",
-        error: { code: "upstream_error", message: "任务成功但未返回视频地址" },
+        error: { code: "upstream_error", message: "任务成功但未返回产物地址" },
       };
     }
-    return { status: "succeeded", progress: 100, outputs: [{ type: "video", url }] };
+    return { status: "succeeded", progress: 100, outputs };
   }
   if (status === "failed") {
     return {
