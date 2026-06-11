@@ -1,3 +1,4 @@
+import Link from "next/link";
 import Canvas from "@/components/Canvas";
 
 export default function Home() {
@@ -8,9 +9,12 @@ export default function Home() {
           Lib<span className="text-violet-400">TV</span>
         </span>
         <span className="text-xs text-zinc-500">无限画布 · 未命名项目</span>
-        <span className="ml-auto rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400">
-          Phase 2 · 全功能创作闭环
-        </span>
+        <Link
+          href="/settings"
+          className="ml-auto rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+        >
+          ⚙️ 设置
+        </Link>
       </header>
       <div className="relative min-h-0 flex-1">
         <Canvas />

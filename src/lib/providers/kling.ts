@@ -111,6 +111,8 @@ export class KlingProvider implements GenerationProvider {
       prompt: req.prompt || undefined,
       duration: String(req.params?.duration ?? 5),
       aspect_ratio: req.params?.aspectRatio ?? "16:9",
+      mode: "std",
+      cfg_scale: 0.5,
     };
 
     if (endpoint === "image2video") {

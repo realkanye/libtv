@@ -38,7 +38,13 @@
 
 ### 接入真实模型（配好 Key 即用）
 
-复制 `.env.example` 为 `.env.local` 填入密钥（不配也能用 Mock 全功能离线运行）：
+**两种配置方式**（详见 [DEPLOY.md](./DEPLOY.md)）：
+1. **网页设置页**（推荐）：启动后点右上角 **⚙️ 设置**，填入 key 与模型 ID，保存即生效，无需改文件或重启；密钥只存服务端 `.data/config.json`，浏览器仅见掩码。
+2. **环境变量**：复制 `.env.example` 为 `.env.local` 填入。
+
+优先级：设置页 > 环境变量 > 内置默认值。不配也能用 Mock + 本地 ffmpeg 全功能离线运行。
+
+> 火山的「模型接入点 ID」常带版本后缀且因账号而异，所以设置页可直接粘贴你账号里的真实 ID —— 填对即跑通，无需改代码。
 
 | Provider | 驱动的能力 | 鉴权 |
 |---|---|---|
@@ -59,9 +65,10 @@
 
 ```bash
 npm install
-npm run dev          # 开发服务器
-npm test             # 契约 + 集成测试
+npm run dev          # 开发服务器（http://localhost:3000）
+npm run build && npm run start   # 生产部署
+npm test             # 63 项测试（含真实 ffmpeg 合成/剪辑）
 npm run typecheck    # 类型检查
 ```
 
-打开 http://localhost:3000，双击画布空白处即可开始创建节点。无需任何密钥即可用 Mock Provider 跑通完整链路。
+打开 http://localhost:3000，双击画布空白处即可开始创建节点。无需任何密钥即可用 Mock + 本地 ffmpeg 跑通完整链路。完整本地部署步骤见 **[DEPLOY.md](./DEPLOY.md)**。

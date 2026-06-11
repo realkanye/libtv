@@ -13,7 +13,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useCanvasStore } from "@/lib/store";
 import { useAssetStore } from "@/lib/clientAssets";
-import { resumeActiveTasks } from "@/lib/taskClient";
+import { resumeActiveTasks, releaseNodeStreams } from "@/lib/taskClient";
 import { runGroup, createComposeNode } from "@/lib/pipeline";
 import { NODE_KIND_META, type LibNode, type NodeKind } from "@/lib/types";
 import { LibNodeComponent } from "./nodes/LibNode";
@@ -143,6 +143,7 @@ function ContextMenu({
           <button
             className={`${itemCls} !text-red-400`}
             onClick={() => {
+              releaseNodeStreams([node.data.taskId]);
               store.getState().removeNodes([menu.nodeId]);
               onClose();
             }}
@@ -221,12 +222,18 @@ function CanvasInner() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastPointer = useRef({ x: 0, y: 0 });
 
-  // localStorage 注水（SSR 安全），随后恢复刷新前进行中的任务
+  // localStorage 注水（SSR 安全），注水完成后再恢复刷新前进行中的任务
   useEffect(() => {
-    void useCanvasStore.persist.rehydrate();
-    setHydrated(true);
-    // 注水是同步的（localStorage），下一帧恢复任务
-    requestAnimationFrame(() => resumeActiveTasks());
+    let active = true;
+    (async () => {
+      await useCanvasStore.persist.rehydrate();
+      if (!active) return;
+      setHydrated(true);
+      resumeActiveTasks();
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const flashError = (msg: string) => {
@@ -362,9 +369,13 @@ function CanvasInner() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodesDelete={(deleted) =>
+          releaseNodeStreams(deleted.map((n) => n.data.taskId))
+        }
         onPaneContextMenu={onPaneContextMenu}
         onNodeContextMenu={onNodeContextMenu}
         onPaneClick={() => setMenu(null)}
+        onMoveStart={() => setMenu(null)}
         zoomOnDoubleClick={false}
         minZoom={0.1}
         fitView

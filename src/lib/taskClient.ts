@@ -49,6 +49,13 @@ function closeStream(taskId: string) {
 export function subscribeTask(taskId: string, nodeId: string): Promise<boolean> {
   closeStream(taskId);
   return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      closeStream(taskId);
+      resolve(ok);
+    };
     const es = new EventSource(`/api/tasks/${taskId}/stream`);
     streams.set(taskId, es);
     es.onmessage = (ev) => {
@@ -60,8 +67,7 @@ export function subscribeTask(taskId: string, nodeId: string): Promise<boolean> 
       }
       applyView(nodeId, view);
       if (view.status === "succeeded" || view.status === "failed") {
-        closeStream(taskId);
-        resolve(view.status === "succeeded");
+        finish(view.status === "succeeded");
       }
     };
     es.addEventListener("notfound", () => {
@@ -69,11 +75,12 @@ export function subscribeTask(taskId: string, nodeId: string): Promise<boolean> 
         status: "error",
         errorMessage: "任务不存在或已过期",
       });
-      closeStream(taskId);
-      resolve(false);
+      finish(false);
     });
     es.onerror = () => {
-      // SSE 断线（如服务重启）：回退到单次查询，不让节点卡死
+      if (settled) return;
+      // SSE 断线（如服务重启）：关闭并回退到单次查询，不让节点卡死
+      settled = true;
       closeStream(taskId);
       void pollOnce(taskId, nodeId).then(resolve);
     };

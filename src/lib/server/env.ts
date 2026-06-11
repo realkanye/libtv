@@ -1,24 +1,21 @@
-// 服务端密钥与配置读取。所有 Key 只存在于服务端环境变量，浏览器永不接触。
-// 集中在此读取，便于「未配置 → 自动降级到 Mock」与 /api/providers 可用性上报。
-// 仅服务端导入（被 Provider 实现引用，绝不进客户端 bundle）。
+// 各 Provider 的配置读取入口。统一走运行时配置存储（设置页文件 > 环境变量 > 默认值），
+// 因此在设置页填入密钥即时生效，无需重启或改文件。
+// 仅服务端导入（绝不进客户端 bundle）。
 
-function read(name: string): string | undefined {
-  const v = process.env[name];
-  return v && v.trim() ? v.trim() : undefined;
-}
+import { getConfig } from "./config";
 
 export const arkConfig = {
-  apiKey: () => read("ARK_API_KEY"),
+  apiKey: () => getConfig().arkApiKey,
   baseUrl: () =>
-    read("ARK_BASE_URL") ?? "https://ark.cn-beijing.volces.com/api/v3",
-  /** 允许用环境变量切换模型 ID（如升级到 Seedance 2.0）。 */
-  seedanceModel: () => read("ARK_SEEDANCE_MODEL"),
-  seedreamModel: () => read("ARK_SEEDREAM_MODEL"),
-  llmModel: () => read("ARK_LLM_MODEL"),
+    getConfig().arkBaseUrl ?? "https://ark.cn-beijing.volces.com/api/v3",
+  /** 允许用设置页/环境变量切换模型 ID（如升级到 Seedance 2.0）。 */
+  seedanceModel: () => getConfig().arkSeedanceModel,
+  seedreamModel: () => getConfig().arkSeedreamModel,
+  llmModel: () => getConfig().arkLlmModel,
 };
 
 export const klingConfig = {
-  accessKey: () => read("KLING_ACCESS_KEY"),
-  secretKey: () => read("KLING_SECRET_KEY"),
-  baseUrl: () => read("KLING_BASE_URL") ?? "https://api.klingai.com",
+  accessKey: () => getConfig().klingAccessKey,
+  secretKey: () => getConfig().klingSecretKey,
+  baseUrl: () => getConfig().klingBaseUrl ?? "https://api.klingai.com",
 };
