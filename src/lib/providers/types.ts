@@ -23,7 +23,12 @@ export type GenerationMode =
   | "text-to-video"
   | "image-to-video" // 单图首帧
   | "keyframe-video" // 首尾帧
-  | "compose-video"; // 多视频(+音频)拼接合成
+  | "compose-video" // 多视频(+音频)拼接合成
+  // ── 本地 ffmpeg 媒体编辑工具（作用于已有节点内容，产出新节点）──
+  | "video-trim" // 视频裁取片段
+  | "extract-audio" // 从视频提取音频
+  | "audio-trim" // 音频截取
+  | "audio-speed"; // 音频变速
 
 /** 某个模式对「输入参考图数量」的要求。 */
 export interface ImageInputSpec {
@@ -65,8 +70,20 @@ export interface ModelCapability {
   /** 可接入的音频数量上限（如合成时的 BGM 轨），默认 0。 */
   maxAudioInputs?: number;
   params: ParamSpec;
+  /** true 表示这是「工具」能力（作用于已有内容产出新节点），不进生成器模型下拉。 */
+  tool?: boolean;
   /** 可选说明，展示在参数面板里。 */
   note?: string;
+}
+
+/** 媒体编辑工具参数（裁取起止/变速倍率），按模式校验。 */
+export interface EditParams {
+  /** 裁取起点（秒）。 */
+  start?: number;
+  /** 裁取终点（秒）。 */
+  end?: number;
+  /** 变速倍率（>1 加速，<1 减速）。 */
+  speed?: number;
 }
 
 /** 归一化后的生成参数（已套用默认值、已校验）。 */
@@ -92,6 +109,8 @@ export interface UnifiedRequest {
   /** 上游文本/脚本节点的内容，作为提示词增强。 */
   refTexts?: string[];
   params?: GenerationParams;
+  /** 媒体编辑工具参数（仅 *-trim / *-speed / extract-audio 等模式使用）。 */
+  edit?: EditParams;
 }
 
 /** 单个产物。type 对齐节点类型以便前端直接渲染。 */

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAudioSpeedArgs,
+  buildAudioTrimArgs,
   buildComposeArgs,
+  buildExtractAudioArgs,
+  buildTrimArgs,
   parseProbeOutput,
   resolutionToSize,
 } from "./ffmpeg";
@@ -80,5 +84,37 @@ describe("buildComposeArgs", () => {
     expect(filter).toContain("amix=inputs=2:duration=first");
     expect(args).toContain("/bgm.mp3");
     expect(args[args.indexOf("-map", args.indexOf("-map") + 1) + 1]).toBe("[aout]");
+  });
+});
+
+describe("媒体编辑工具参数构造", () => {
+  it("视频裁取：-ss/-to 精确到毫秒，重编码", () => {
+    const args = buildTrimArgs("/in.mp4", 1.5, 4.25, "/out.mp4");
+    expect(args[args.indexOf("-ss") + 1]).toBe("1.500");
+    expect(args[args.indexOf("-to") + 1]).toBe("4.250");
+    expect(args).toContain("libx264");
+    expect(args[args.length - 1]).toBe("/out.mp4");
+  });
+  it("裁取终点不大于起点时报错", () => {
+    expect(() => buildTrimArgs("/in.mp4", 3, 3, "/o.mp4")).toThrow("大于起点");
+    expect(() => buildAudioTrimArgs("/in.mp3", 5, 2, "/o.mp3")).toThrow();
+  });
+  it("提取音频：-vn + mp3 编码", () => {
+    const args = buildExtractAudioArgs("/in.mp4", "/out.mp3");
+    expect(args).toContain("-vn");
+    expect(args).toContain("libmp3lame");
+  });
+  it("音频变速：范围内单级 atempo", () => {
+    const args = buildAudioSpeedArgs("/in.mp3", 1.5, "/out.mp3");
+    expect(args[args.indexOf("-filter:a") + 1]).toBe("atempo=1.5");
+  });
+  it("音频变速：超出 0.5–2.0 时串联多级 atempo", () => {
+    const fast = buildAudioSpeedArgs("/in.mp3", 4, "/o.mp3");
+    expect(fast[fast.indexOf("-filter:a") + 1]).toBe("atempo=2,atempo=2");
+    const slow = buildAudioSpeedArgs("/in.mp3", 0.25, "/o.mp3");
+    expect(slow[slow.indexOf("-filter:a") + 1]).toBe("atempo=0.5,atempo=0.5");
+  });
+  it("变速倍率非正时报错", () => {
+    expect(() => buildAudioSpeedArgs("/in.mp3", 0, "/o.mp3")).toThrow();
   });
 });

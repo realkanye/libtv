@@ -147,6 +147,86 @@ describe("validateAndNormalize", () => {
     if (script.ok) expect(script.capability.kind).toBe("script");
   });
 
+  it("媒体工具：视频裁取需要源视频与起止", () => {
+    const noSource = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-video-trim",
+      mode: "video-trim",
+      prompt: "",
+      edit: { start: 0, end: 3 },
+    });
+    expect(noSource.ok).toBe(false);
+
+    const noRange = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-video-trim",
+      mode: "video-trim",
+      prompt: "",
+      videos: ["/uploads/a.mp4"],
+    });
+    expect(noRange.ok).toBe(false);
+
+    const ok = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-video-trim",
+      mode: "video-trim",
+      prompt: "",
+      videos: ["/uploads/a.mp4"],
+      edit: { start: 1, end: 4 },
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.value.edit).toEqual({ start: 1, end: 4 });
+      expect(ok.value.videos).toEqual(["/uploads/a.mp4"]);
+    }
+  });
+
+  it("媒体工具：终点必须大于起点", () => {
+    const r = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-audio-trim",
+      mode: "audio-trim",
+      prompt: "",
+      audios: ["/uploads/a.mp3"],
+      edit: { start: 5, end: 2 },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.message).toContain("终点必须大于起点");
+  });
+
+  it("媒体工具：变速倍率范围 0.25–4", () => {
+    const ok = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-audio-speed",
+      mode: "audio-speed",
+      prompt: "",
+      audios: ["/uploads/a.mp3"],
+      edit: { speed: 1.5 },
+    });
+    expect(ok.ok).toBe(true);
+
+    const bad = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-audio-speed",
+      mode: "audio-speed",
+      prompt: "",
+      audios: ["/uploads/a.mp3"],
+      edit: { speed: 8 },
+    });
+    expect(bad.ok).toBe(false);
+  });
+
+  it("媒体工具：提取音频只需源视频", () => {
+    const r = validateAndNormalize({
+      providerId: "local",
+      modelId: "ffmpeg-extract-audio",
+      mode: "extract-audio",
+      prompt: "",
+      videos: ["/uploads/a.mp4"],
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("裁掉模型未声明的参数", () => {
     const r = validateAndNormalize({
       providerId: "mock",

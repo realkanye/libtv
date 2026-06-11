@@ -172,6 +172,52 @@ export const CATALOG: ModelCapability[] = [
     },
     note: "多视频片段按连接顺序拼接，可混入一条 BGM 音轨",
   },
+
+  // ───────────── 本地 ffmpeg 媒体编辑工具（不进生成器下拉）─────────────
+  {
+    providerId: "local",
+    modelId: "ffmpeg-video-trim",
+    label: "视频裁取",
+    kind: "video",
+    modes: ["video-trim"],
+    sync: false,
+    tool: true,
+    params: {},
+    note: "裁取视频片段为新视频节点",
+  },
+  {
+    providerId: "local",
+    modelId: "ffmpeg-extract-audio",
+    label: "提取音频",
+    kind: "audio",
+    modes: ["extract-audio"],
+    sync: false,
+    tool: true,
+    params: {},
+    note: "从视频分离出音频为新音频节点",
+  },
+  {
+    providerId: "local",
+    modelId: "ffmpeg-audio-trim",
+    label: "音频截取",
+    kind: "audio",
+    modes: ["audio-trim"],
+    sync: false,
+    tool: true,
+    params: {},
+    note: "截取音频片段为新音频节点",
+  },
+  {
+    providerId: "local",
+    modelId: "ffmpeg-audio-speed",
+    label: "音频变速",
+    kind: "audio",
+    modes: ["audio-speed"],
+    sync: false,
+    tool: true,
+    params: {},
+    note: "调整音频播放速度（不变调）",
+  },
 ];
 
 /** 稳定的能力键，用作前端下拉的 value 与节点存储。 */
@@ -205,9 +251,14 @@ export function findCapabilityByKey(key: string): ModelCapability | undefined {
   return CATALOG.find((c) => capabilityKey(c) === key);
 }
 
-/** 某节点类型下的全部模型能力。 */
+/** 某节点类型下的生成器模型（排除工具）。用于节点的模型下拉。 */
 export function capabilitiesForKind(kind: NodeKind): ModelCapability[] {
-  return CATALOG.filter((c) => c.kind === kind);
+  return CATALOG.filter((c) => c.kind === kind && !c.tool);
+}
+
+/** 某节点类型可应用的「工具」能力（裁取/提取/变速等）。 */
+export function toolsForKind(kind: NodeKind): ModelCapability[] {
+  return CATALOG.filter((c) => c.kind === kind && c.tool);
 }
 
 /** 某节点类型的默认模型 —— 永远返回 Mock，保证无密钥时即可用。 */

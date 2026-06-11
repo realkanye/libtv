@@ -18,11 +18,16 @@ import type {
 import { ProviderError } from "./types";
 import { CATALOG } from "./catalog";
 import {
+  buildAudioSpeedArgs,
+  buildAudioTrimArgs,
   buildComposeArgs,
+  buildExtractAudioArgs,
+  buildTrimArgs,
   parseProbeOutput,
   resolutionToSize,
   type ClipInfo,
 } from "./ffmpeg";
+import type { NodeKind } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
 
@@ -53,6 +58,8 @@ interface ComposeJob {
   status: "running" | "succeeded" | "failed";
   progress: number;
   outputUrl?: string;
+  /** 产物类型（合成/裁取为 video，提取/音频工具为 audio）。 */
+  outputType: NodeKind;
   error?: string;
 }
 
@@ -110,14 +117,24 @@ export class LocalProvider implements GenerationProvider {
   }
 
   async createTask(req: UnifiedRequest): Promise<CreateTaskResult> {
-    const id = `compose:${Date.now()}-${++jobSeq}`;
-    jobs().set(id, { status: "running", progress: 0 });
+    const id = `local:${Date.now()}-${++jobSeq}`;
+    const outputType: NodeKind =
+      req.mode === "extract-audio" ||
+      req.mode === "audio-trim" ||
+      req.mode === "audio-speed"
+        ? "audio"
+        : "video";
+    jobs().set(id, { status: "running", progress: 0, outputType });
+    const work =
+      req.mode === "compose-video" ? this.runCompose(id, req) : this.runEdit(id, req);
     // 后台执行，由统一轮询器经 getTask 拉取进度
-    void this.runCompose(id, req).catch((e) => {
+    void work.catch((e) => {
+      const cur = jobs().get(id);
       jobs().set(id, {
         status: "failed",
         progress: 0,
-        error: e instanceof Error ? e.message : "合成失败",
+        outputType: cur?.outputType ?? "video",
+        error: e instanceof Error ? e.message : "处理失败",
       });
     });
     return { kind: "async", upstreamTaskId: id };
@@ -128,23 +145,70 @@ export class LocalProvider implements GenerationProvider {
     if (!job) {
       return {
         status: "failed",
-        error: { code: "task_expired", message: "服务已重启，请重新合成" },
+        error: { code: "task_expired", message: "服务已重启，请重新处理" },
       };
     }
     if (job.status === "succeeded") {
       return {
         status: "succeeded",
         progress: 100,
-        outputs: [{ type: "video", url: job.outputUrl! }],
+        outputs: [{ type: job.outputType, url: job.outputUrl! }],
       };
     }
     if (job.status === "failed") {
       return {
         status: "failed",
-        error: { code: "upstream_error", message: job.error ?? "合成失败" },
+        error: { code: "upstream_error", message: job.error ?? "处理失败" },
       };
     }
     return { status: "running", progress: job.progress };
+  }
+
+  /** 媒体编辑工具：裁取 / 提取音频 / 音频变速。 */
+  private async runEdit(id: string, req: UnifiedRequest) {
+    const update = (patch: Partial<ComposeJob>) => {
+      const cur = jobs().get(id);
+      if (cur) jobs().set(id, { ...cur, ...patch });
+    };
+    const fromVideo = req.mode === "video-trim" || req.mode === "extract-audio";
+    const sourceUrl = (fromVideo ? req.videos : req.audios)?.[0];
+    if (!sourceUrl) throw new ProviderError("invalid_request", "缺少源素材");
+    const input = await toLocalFile(sourceUrl, "src");
+    update({ progress: 40 });
+
+    await mkdir(OUT_DIR, { recursive: true });
+    const ext = req.mode === "video-trim" ? "mp4" : "mp3";
+    const outName = `${id.replace(/[^a-zA-Z0-9-]/g, "-")}.${ext}`;
+    const outputPath = join(OUT_DIR, outName);
+    const edit = req.edit ?? {};
+
+    let args: string[];
+    switch (req.mode) {
+      case "video-trim":
+        args = buildTrimArgs(input, edit.start!, edit.end!, outputPath);
+        break;
+      case "extract-audio":
+        args = buildExtractAudioArgs(input, outputPath);
+        break;
+      case "audio-trim":
+        args = buildAudioTrimArgs(input, edit.start!, edit.end!, outputPath);
+        break;
+      case "audio-speed":
+        args = buildAudioSpeedArgs(input, edit.speed!, outputPath);
+        break;
+      default:
+        throw new ProviderError("invalid_request", `不支持的工具模式 ${req.mode}`);
+    }
+
+    update({ progress: 60 });
+    await execFileAsync(this.ffmpegPath!, args, {
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 10 * 60 * 1000,
+    }).catch((e) => {
+      const msg = (e as { stderr?: string }).stderr?.slice(-300) ?? (e as Error).message;
+      throw new ProviderError("upstream_error", `ffmpeg 处理失败：${msg}`);
+    });
+    update({ status: "succeeded", progress: 100, outputUrl: `/generated/${outName}` });
   }
 
   private async runCompose(id: string, req: UnifiedRequest) {

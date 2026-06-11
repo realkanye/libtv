@@ -10,14 +10,23 @@ import {
   capabilityKey,
   findCapability,
   resolveMode,
+  toolsForKind,
 } from "@/lib/providers/catalog";
 import { reconcileParams } from "@/lib/providers/params";
 import { validateAndNormalize } from "@/lib/providers/validate";
 import { useProviderAvailability } from "@/lib/clientProviders";
-import { startGeneration, retryGeneration } from "@/lib/taskClient";
+import {
+  startGeneration,
+  retryGeneration,
+  startToolGeneration,
+} from "@/lib/taskClient";
 import { generateShotImages, generateShotVideos } from "@/lib/pipeline";
 import { SLASH_PRESETS } from "@/lib/slashPresets";
-import type { GenerationParams, ModelCapability } from "@/lib/providers/types";
+import type {
+  EditParams,
+  GenerationParams,
+  ModelCapability,
+} from "@/lib/providers/types";
 
 function Spinner({ data }: { data: LibNodeType["data"] }) {
   return (
@@ -196,6 +205,130 @@ function ParamControls({
   );
 }
 
+const SPEED_PRESETS = [0.5, 0.75, 1.25, 1.5, 2];
+
+/** 媒体编辑工具条：作用于已完成的视频/音频节点内容，产出新节点。 */
+function NodeTools({
+  nodeId,
+  kind,
+  duration,
+}: {
+  nodeId: string;
+  kind: "video" | "audio";
+  duration: number;
+}) {
+  const tools = toolsForKind(kind);
+  const [open, setOpen] = useState<string | null>(null); // 展开中的工具 modelId
+  const [start, setStart] = useState("0");
+  const [end, setEnd] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!tools.length) return null;
+
+  const run = async (tool: ModelCapability, edit: EditParams) => {
+    if (busy) return;
+    setBusy(true);
+    setOpen(null);
+    try {
+      await startToolGeneration(nodeId, tool, edit);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onToolClick = (tool: ModelCapability) => {
+    const mode = tool.modes[0];
+    if (mode === "extract-audio") {
+      void run(tool, {});
+    } else if (mode === "video-trim" || mode === "audio-trim") {
+      setEnd(duration ? duration.toFixed(1) : "");
+      setStart("0");
+      setOpen(open === tool.modelId ? null : tool.modelId);
+    } else if (mode === "audio-speed") {
+      setOpen(open === tool.modelId ? null : tool.modelId);
+    }
+  };
+
+  const openTool = tools.find((t) => t.modelId === open);
+
+  return (
+    <div className="nodrag mt-1.5 border-t border-zinc-800 pt-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        {tools.map((t) => (
+          <button
+            key={t.modelId}
+            disabled={busy}
+            onClick={() => onToolClick(t)}
+            className={`rounded-md px-2 py-1 text-[10px] ${
+              open === t.modelId
+                ? "bg-zinc-700 text-white"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            } disabled:opacity-40`}
+          >
+            🛠 {t.label}
+          </button>
+        ))}
+      </div>
+
+      {openTool &&
+        (openTool.modes[0] === "video-trim" ||
+          openTool.modes[0] === "audio-trim") && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-zinc-400">
+            <span>起</span>
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              className="w-14 rounded bg-zinc-800 px-1 py-0.5 text-zinc-200 outline-none"
+            />
+            <span>止</span>
+            <input
+              type="number"
+              min={0}
+              step={0.1}
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+              className="w-14 rounded bg-zinc-800 px-1 py-0.5 text-zinc-200 outline-none"
+            />
+            <span className="text-zinc-600">秒</span>
+            <button
+              onClick={() =>
+                run(openTool, {
+                  start: Number(start) || 0,
+                  end: Number(end) || 0,
+                })
+              }
+              className="ml-auto rounded bg-emerald-600 px-2 py-0.5 text-white"
+            >
+              裁取
+            </button>
+          </div>
+        )}
+
+      {openTool && openTool.modes[0] === "audio-speed" && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-400">
+          <span>倍速</span>
+          {SPEED_PRESETS.map((s) => (
+            <button
+              key={s}
+              onClick={() => run(openTool, { speed: s })}
+              className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-200 hover:bg-zinc-700"
+            >
+              {s}x
+            </button>
+          ))}
+        </div>
+      )}
+      {busy && (
+        <div className="mt-1 text-center text-[10px] text-zinc-500">
+          处理中…已新建结果节点
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
   const meta = NODE_KIND_META[data.kind];
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
@@ -211,6 +344,7 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
   const [slashOpen, setSlashOpen] = useState(false);
   const [selectedShots, setSelectedShots] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState<string | null>(null);
+  const [mediaDuration, setMediaDuration] = useState(0);
 
   const caps = capabilitiesForKind(data.kind);
   const isCompose = data.kind === "video" && data.providerId === "local";
@@ -398,10 +532,26 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
         );
       case "video":
         return (
-          <video src={data.content!} controls className="w-full rounded-md" />
+          <video
+            src={data.content!}
+            controls
+            className="w-full rounded-md"
+            onLoadedMetadata={(e) =>
+              setMediaDuration(e.currentTarget.duration || 0)
+            }
+          />
         );
       case "audio":
-        return <audio src={data.content!} controls className="w-full" />;
+        return (
+          <audio
+            src={data.content!}
+            controls
+            className="w-full"
+            onLoadedMetadata={(e) =>
+              setMediaDuration(e.currentTarget.duration || 0)
+            }
+          />
+        );
       case "script":
         return (
           <ShotTable
@@ -455,6 +605,16 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
             重试
           </button>
         )}
+        {/* 媒体编辑工具：已完成的视频/音频节点 */}
+        {data.status === "done" &&
+          data.content &&
+          (data.kind === "video" || data.kind === "audio") && (
+            <NodeTools
+              nodeId={id}
+              kind={data.kind}
+              duration={mediaDuration}
+            />
+          )}
         {/* 脚本流水线：生成分镜图 / 批量生成视频 */}
         {data.kind === "script" && (data.shots?.length ?? 0) > 0 && (
           <div className="nodrag mt-1.5 flex gap-2">

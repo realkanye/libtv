@@ -119,6 +119,111 @@ export function buildComposeArgs(
   return args;
 }
 
+/** 裁取视频片段 [start, end]（秒）。重新编码以保证关键帧精确。 */
+export function buildTrimArgs(
+  input: string,
+  start: number,
+  end: number,
+  output: string
+): string[] {
+  if (!(end > start)) {
+    throw new Error("裁取终点必须大于起点");
+  }
+  return [
+    "-y",
+    "-ss",
+    start.toFixed(3),
+    "-to",
+    end.toFixed(3),
+    "-i",
+    input,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "23",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    output,
+  ];
+}
+
+/** 从视频提取音频为 mp3。 */
+export function buildExtractAudioArgs(input: string, output: string): string[] {
+  return ["-y", "-i", input, "-vn", "-c:a", "libmp3lame", "-q:a", "2", output];
+}
+
+/** 截取音频片段 [start, end]（秒）。 */
+export function buildAudioTrimArgs(
+  input: string,
+  start: number,
+  end: number,
+  output: string
+): string[] {
+  if (!(end > start)) {
+    throw new Error("截取终点必须大于起点");
+  }
+  return [
+    "-y",
+    "-ss",
+    start.toFixed(3),
+    "-to",
+    end.toFixed(3),
+    "-i",
+    input,
+    "-c:a",
+    "libmp3lame",
+    "-q:a",
+    "2",
+    output,
+  ];
+}
+
+/**
+ * 音频变速（不改变音调）。ffmpeg atempo 单次仅支持 0.5–2.0，
+ * 超出范围时串联多级 atempo。
+ */
+export function buildAudioSpeedArgs(
+  input: string,
+  speed: number,
+  output: string
+): string[] {
+  if (!(speed > 0)) {
+    throw new Error("变速倍率必须为正数");
+  }
+  const factors: number[] = [];
+  let remaining = speed;
+  while (remaining > 2.0) {
+    factors.push(2.0);
+    remaining /= 2.0;
+  }
+  while (remaining < 0.5) {
+    factors.push(0.5);
+    remaining /= 0.5;
+  }
+  factors.push(Number(remaining.toFixed(4)));
+  const filter = factors.map((f) => `atempo=${f}`).join(",");
+  return [
+    "-y",
+    "-i",
+    input,
+    "-filter:a",
+    filter,
+    "-c:a",
+    "libmp3lame",
+    "-q:a",
+    "2",
+    output,
+  ];
+}
+
 /** 解析 `ffprobe -show_streams -show_format -of json` 的输出。 */
 export function parseProbeOutput(
   path: string,

@@ -18,6 +18,10 @@ const MODE_LABELS: Record<GenerationMode, string> = {
   "image-to-video": "图生视频（首帧）",
   "keyframe-video": "首尾帧视频",
   "compose-video": "视频合成",
+  "video-trim": "视频裁取",
+  "extract-audio": "提取音频",
+  "audio-trim": "音频截取",
+  "audio-speed": "音频变速",
 };
 
 const envelopeSchema = z.object({
@@ -33,6 +37,10 @@ const envelopeSchema = z.object({
     "image-to-video",
     "keyframe-video",
     "compose-video",
+    "video-trim",
+    "extract-audio",
+    "audio-trim",
+    "audio-speed",
   ]),
   prompt: z.string(),
   images: z.array(z.string()).optional(),
@@ -40,7 +48,22 @@ const envelopeSchema = z.object({
   audios: z.array(z.string()).optional(),
   refTexts: z.array(z.string()).optional(),
   params: z.record(z.string(), z.unknown()).optional(),
+  edit: z
+    .object({
+      start: z.number().optional(),
+      end: z.number().optional(),
+      speed: z.number().optional(),
+    })
+    .optional(),
 });
+
+/** 媒体编辑工具模式（作用于已有内容）。 */
+const EDIT_MODES: GenerationMode[] = [
+  "video-trim",
+  "extract-audio",
+  "audio-trim",
+  "audio-speed",
+];
 
 export type ValidationResult =
   | { ok: true; value: UnifiedRequest; capability: ModelCapability }
@@ -83,6 +106,11 @@ export function validateAndNormalize(input: unknown): ValidationResult {
     return fail(
       `「${capability.label}」不支持${MODE_LABELS[req.mode]}，仅支持：${supported}`
     );
+  }
+
+  // 媒体编辑工具走独立校验路径（单素材 + 编辑参数）
+  if (EDIT_MODES.includes(req.mode)) {
+    return validateEdit(req, capability);
   }
 
   // 2) 参考图数量校验
@@ -188,5 +216,51 @@ export function validateAndNormalize(input: unknown): ValidationResult {
     params,
   };
 
+  return { ok: true, value, capability };
+}
+
+/** 媒体编辑工具校验：取单个源素材 + 编辑参数。 */
+function validateEdit(
+  req: z.infer<typeof envelopeSchema>,
+  capability: ModelCapability
+): ValidationResult {
+  const videos = (req.videos ?? []).filter((s) => s && s.trim());
+  const audios = (req.audios ?? []).filter((s) => s && s.trim());
+  const edit = req.edit ?? {};
+
+  // 源素材：video-trim/extract-audio 取视频；audio-* 取音频
+  const fromVideo = req.mode === "video-trim" || req.mode === "extract-audio";
+  const source = fromVideo ? videos[0] : audios[0];
+  if (!source) {
+    return fail(fromVideo ? "缺少源视频" : "缺少源音频");
+  }
+
+  // 裁取类需要合法的 start/end
+  if (req.mode === "video-trim" || req.mode === "audio-trim") {
+    const { start, end } = edit;
+    if (start == null || end == null) {
+      return fail("请设置裁取的起点与终点");
+    }
+    if (start < 0) return fail("起点不能为负");
+    if (!(end > start)) return fail("终点必须大于起点");
+  }
+  // 变速需要合法倍率
+  if (req.mode === "audio-speed") {
+    const { speed } = edit;
+    if (speed == null) return fail("请设置变速倍率");
+    if (!(speed > 0)) return fail("变速倍率必须为正数");
+    if (speed < 0.25 || speed > 4) return fail("变速倍率支持 0.25–4 倍");
+  }
+
+  const value: UnifiedRequest = {
+    providerId: req.providerId,
+    modelId: req.modelId,
+    mode: req.mode,
+    prompt: "",
+    videos: fromVideo ? [source] : undefined,
+    audios: fromVideo ? undefined : [source],
+    params: {},
+    edit,
+  };
   return { ok: true, value, capability };
 }

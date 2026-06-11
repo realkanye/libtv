@@ -5,8 +5,9 @@
 // SSE 订阅 → 写回节点。刷新后由 resumeActiveTasks 恢复进行中的任务。
 
 import { useCanvasStore } from "./store";
-import { findCapability, resolveMode } from "./providers/catalog";
+import { resolveMode } from "./providers/catalog";
 import { validateAndNormalize } from "./providers/validate";
+import type { EditParams, ModelCapability } from "./providers/types";
 import type { LibNodeData } from "./types";
 import type { TaskView } from "./tasks/types";
 
@@ -183,6 +184,78 @@ export async function retryGeneration(nodeId: string): Promise<boolean> {
     }
   }
   return startGeneration(nodeId);
+}
+
+/**
+ * 媒体编辑工具：对源节点内容应用 ffmpeg 工具（裁取/提取/变速），
+ * 产出一个新结果节点（连线自源节点，便于溯源）。返回是否成功。
+ */
+export async function startToolGeneration(
+  sourceNodeId: string,
+  tool: ModelCapability,
+  edit: EditParams
+): Promise<boolean> {
+  const store = useCanvasStore.getState();
+  const source = store.nodes.find((n) => n.id === sourceNodeId);
+  if (!source || source.data.status !== "done" || !source.data.content) {
+    return false;
+  }
+  const mode = tool.modes[0];
+  const fromVideo = mode === "video-trim" || mode === "extract-audio";
+
+  // 结果节点用默认模型（普通可再编辑节点），仅承载产物
+  const resultId = store.addNode(
+    tool.kind,
+    {
+      x: source.position.x + 360,
+      y: source.position.y + 40,
+    },
+    { status: "queued", progress: 0 }
+  );
+  useCanvasStore.getState().addEdgeBetween(sourceNodeId, resultId);
+
+  const payload = {
+    nodeId: resultId,
+    providerId: tool.providerId,
+    modelId: tool.modelId,
+    mode,
+    prompt: "",
+    videos: fromVideo ? [source.data.content] : undefined,
+    audios: fromVideo ? undefined : [source.data.content],
+    edit,
+    params: {},
+  };
+  const check = validateAndNormalize(payload);
+  if (!check.ok) {
+    useCanvasStore.getState().updateNodeData(resultId, {
+      status: "error",
+      errorMessage: check.message,
+    });
+    return false;
+  }
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      useCanvasStore.getState().updateNodeData(resultId, {
+        status: "error",
+        errorMessage: body.error ?? `请求失败（${res.status}）`,
+      });
+      return false;
+    }
+    useCanvasStore.getState().updateNodeData(resultId, { taskId: body.taskId });
+    return await subscribeTask(body.taskId, resultId);
+  } catch {
+    useCanvasStore.getState().updateNodeData(resultId, {
+      status: "error",
+      errorMessage: "网络错误，请重试",
+    });
+    return false;
+  }
 }
 
 /** 画布注水完成后调用：恢复刷新前进行中的任务。 */

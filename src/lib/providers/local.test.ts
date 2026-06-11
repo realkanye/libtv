@@ -74,4 +74,66 @@ describe.runIf(!!ffmpeg)("LocalProvider 真实合成（ffmpeg）", () => {
     },
     90_000
   );
+
+  async function settle(
+    provider: LocalProvider,
+    created: { kind: "async"; upstreamTaskId: string } | { kind: "sync"; outputs: unknown[] }
+  ) {
+    if (created.kind !== "async") throw new Error("expected async");
+    let state = await provider.getTask(created.upstreamTaskId);
+    const deadline = Date.now() + 60_000;
+    while (state.status === "running" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+      state = await provider.getTask(created.upstreamTaskId);
+    }
+    return state;
+  }
+
+  it(
+    "媒体工具：裁取视频 + 提取音频 + 音频变速",
+    async () => {
+      const dir = join(process.cwd(), "public", "uploads");
+      await mkdir(dir, { recursive: true });
+      const src = join(dir, "test-edit-src.mp4");
+      // 2s 测试视频，带音轨
+      await execFileAsync(ffmpeg!, [
+        "-y", "-f", "lavfi", "-i", "testsrc=size=320x180:rate=30:duration=2",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+        "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-shortest", src,
+      ]);
+
+      const provider = new LocalProvider();
+
+      // 1) 裁取 0.5–1.5s
+      const trim = await provider.createTask({
+        providerId: "local", modelId: "ffmpeg-video-trim", mode: "video-trim",
+        prompt: "", videos: ["/uploads/test-edit-src.mp4"],
+        edit: { start: 0.5, end: 1.5 },
+      });
+      const trimState = await settle(provider, trim);
+      expect(trimState.status).toBe("succeeded");
+      expect(trimState.outputs?.[0]?.type).toBe("video");
+
+      // 2) 提取音频
+      const extract = await provider.createTask({
+        providerId: "local", modelId: "ffmpeg-extract-audio", mode: "extract-audio",
+        prompt: "", videos: ["/uploads/test-edit-src.mp4"],
+      });
+      const extractState = await settle(provider, extract);
+      expect(extractState.status).toBe("succeeded");
+      expect(extractState.outputs?.[0]?.type).toBe("audio");
+      const audioUrl = extractState.outputs![0].url!;
+      expect(audioUrl).toMatch(/\.mp3$/);
+
+      // 3) 对提取出的音频变速 2x
+      const speed = await provider.createTask({
+        providerId: "local", modelId: "ffmpeg-audio-speed", mode: "audio-speed",
+        prompt: "", audios: [audioUrl], edit: { speed: 2 },
+      });
+      const speedState = await settle(provider, speed);
+      expect(speedState.status).toBe("succeeded");
+      expect(speedState.outputs?.[0]?.type).toBe("audio");
+    },
+    90_000
+  );
 });
