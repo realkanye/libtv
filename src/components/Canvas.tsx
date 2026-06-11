@@ -63,7 +63,7 @@ function ContextMenu({
   const addAsset = useAssetStore((s) => s.addAsset);
 
   const itemCls =
-    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-800";
+    "flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs text-zinc-200 transition-colors hover:bg-white/5";
 
   const node =
     menu.type === "node"
@@ -72,7 +72,7 @@ function ContextMenu({
 
   return (
     <div
-      className="absolute z-50 w-44 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-2xl"
+      className="lib-glass lib-fade-in absolute z-50 w-48 overflow-hidden rounded-xl border border-[var(--border)] p-1 shadow-[0_16px_48px_rgba(0,0,0,0.6)]"
       style={{ left: menu.screen.x, top: menu.screen.y }}
       onMouseLeave={onClose}
     >
@@ -195,9 +195,9 @@ function SelectionToolbar() {
   };
 
   return (
-    <div className="absolute left-1/2 top-16 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/95 px-4 py-1.5 backdrop-blur">
+    <div className="lib-glass lib-fade-in absolute left-1/2 top-16 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--border)] px-4 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.45)]">
       <span className="text-[11px] text-zinc-400">
-        已选 {selected.length} 个节点
+        已选 <span className="font-semibold text-zinc-200">{selected.length}</span> 个节点
       </span>
       <button
         onClick={() => void exec()}
@@ -396,7 +396,8 @@ function CanvasInner() {
 
   if (!hydrated) {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-zinc-600">
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-xs text-zinc-600">
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-violet-500" />
         加载画布…
       </div>
     );
@@ -434,11 +435,21 @@ function CanvasInner() {
         fitView
         proOptions={{ hideAttribution: true }}
         colorMode="dark"
+        defaultEdgeOptions={{ animated: true }}
         deleteKeyCode={["Delete", "Backspace"]}
       >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} />
-        <MiniMap pannable zoomable position="bottom-left" />
-        <Controls position="bottom-right" />
+        <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#2a2a32" />
+        <MiniMap
+          pannable
+          zoomable
+          position="bottom-left"
+          nodeColor={(n) =>
+            NODE_KIND_META[(n.data as { kind: NodeKind }).kind]?.accent ?? "#52525b"
+          }
+          nodeStrokeWidth={0}
+          maskColor="rgba(9,9,11,0.7)"
+        />
+        <Controls position="bottom-right" showInteractive={false} />
       </ReactFlow>
 
       <Sidebar onUploadClick={() => fileInputRef.current?.click()} />
@@ -458,13 +469,14 @@ function CanvasInner() {
       />
 
       {uploadError && (
-        <div className="absolute bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-red-800 bg-red-950/90 px-4 py-2 text-xs text-red-300">
+        <div className="lib-fade-in absolute bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-red-500/40 bg-red-950/90 px-4 py-2 text-xs text-red-200 shadow-lg backdrop-blur">
           {uploadError}
         </div>
       )}
 
-      <div className="pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-full border border-zinc-800 bg-zinc-900/80 px-4 py-1.5 text-xs text-zinc-400 backdrop-blur">
-        双击空白处建节点 · 拖文件入画布上传 · 右键更多操作 · 框选多节点可整组执行/合成
+      <div className="lib-glass pointer-events-none absolute left-1/2 top-4 z-40 -translate-x-1/2 rounded-full border border-[var(--border)] px-4 py-1.5 text-[11px] text-zinc-400 shadow-lg">
+        双击空白建节点 · 拖文件上传 · 拉线建节点 · 右键更多 · 框选可整组执行/合成 ·{" "}
+        <span className="text-zinc-500">⌘Z 撤销</span>
       </div>
     </div>
   );

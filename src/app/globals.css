@@ -1,26 +1,159 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* 专业暗色创作台调色 */
+  --bg: #09090b;
+  --bg-elevated: #131318;
+  --panel: rgba(20, 20, 26, 0.92);
+  --border: #27272e;
+  --border-strong: #3a3a44;
+  --text: #ededf2;
+  --text-dim: #a1a1aa;
+  --accent: #8b5cf6;
+  --accent-soft: rgba(139, 92, 246, 0.16);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ───────────────── 画布背景：深色 + 极淡的径向光晕 ───────────────── */
+.react-flow {
+  background:
+    radial-gradient(1200px 800px at 15% -10%, rgba(99, 102, 241, 0.06), transparent 60%),
+    radial-gradient(1000px 700px at 100% 110%, rgba(139, 92, 246, 0.05), transparent 55%),
+    var(--bg);
+}
+
+/* ───────────────── 连线 ───────────────── */
+.react-flow__edge-path {
+  stroke: #52525b;
+  stroke-width: 1.5;
+  transition: stroke 0.15s ease;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 6 5;
+}
+.react-flow__connectionline .react-flow__connection-path {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* ───────────────── 连接点 handle ───────────────── */
+.react-flow__handle {
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+  border-color: var(--bg-elevated);
+  transition: box-shadow 0.15s ease, transform 0.12s ease;
+}
+.react-flow__handle:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+/* ───────────────── 选区 / 节点聚焦 ───────────────── */
+.react-flow__nodesselection-rect,
+.react-flow__selection {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  border-radius: 6px;
+}
+.react-flow__node:focus,
+.react-flow__node:focus-visible {
+  outline: none;
+}
+
+/* ───────────────── 控件 & 小地图 ───────────────── */
+.react-flow__controls {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  background: var(--bg-elevated);
+}
+.react-flow__controls-button {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 30px;
+  height: 30px;
+}
+.react-flow__controls-button:hover {
+  background: #1d1d24;
+  color: var(--text);
+}
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+.react-flow__minimap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.react-flow__minimap-mask {
+  fill: rgba(9, 9, 11, 0.7);
+}
+
+/* ───────────────── 细滚动条 ───────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a44 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #34343c;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #4a4a55;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ───────────────── 通用动效 ───────────────── */
+@keyframes lib-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.lib-fade-in {
+  animation: lib-fade-in 0.16s ease-out;
+}
+
+/* 玻璃面板 */
+.lib-glass {
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }

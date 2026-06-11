@@ -35,9 +35,9 @@ function Spinner({ data }: { data: LibNodeType["data"] }) {
         {data.status === "queued" ? "排队中…" : `生成中… ${data.progress}%`}
       </span>
       {data.status === "generating" && (
-        <div className="h-1 w-3/4 overflow-hidden rounded-full bg-zinc-800">
+        <div className="h-1.5 w-3/4 overflow-hidden rounded-full bg-black/40">
           <div
-            className="h-full bg-zinc-400 transition-all"
+            className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 transition-all duration-300"
             style={{ width: `${Math.max(5, data.progress)}%` }}
           />
         </div>
@@ -443,7 +443,8 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
     }
     if (data.status === "error") {
       return (
-        <div className="flex min-h-16 items-center justify-center p-2 text-center text-xs text-red-400">
+        <div className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg bg-red-500/5 p-3 text-center text-xs text-red-300">
+          <span className="text-base">⚠️</span>
           {data.errorMessage ?? "生成失败，请重试"}
         </div>
       );
@@ -484,13 +485,14 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
     }
     if (!data.content && !data.shots) {
       return (
-        <div className="flex h-20 flex-col items-center justify-center gap-1 text-xs text-zinc-500">
-          <span>
+        <div className="flex h-24 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/8 text-xs text-zinc-500">
+          <span className="text-2xl opacity-25 grayscale">{meta.icon}</span>
+          <span className="text-[11px]">
             {isCompose ? "连入视频后点击「合成」" : "输入提示词并点击生成"}
           </span>
           {data.kind === "text" && (
             <button
-              className="nodrag rounded-md border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800"
+              className="nodrag rounded-md border border-[var(--border)] px-2 py-0.5 text-[10px] text-zinc-400 transition-colors hover:bg-white/5"
               onClick={() => {
                 setTextDraft("");
                 setEditingText(true);
@@ -526,7 +528,7 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
           <img
             src={data.content!}
             alt="生成图片"
-            className="w-full rounded-md"
+            className="w-full rounded-lg ring-1 ring-white/5"
             draggable={false}
           />
         );
@@ -535,7 +537,7 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
           <video
             src={data.content!}
             controls
-            className="w-full rounded-md"
+            className="w-full rounded-lg ring-1 ring-white/5"
             onLoadedMetadata={(e) =>
               setMediaDuration(e.currentTarget.duration || 0)
             }
@@ -571,28 +573,65 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
     }
   };
 
+  const statusDot =
+    data.status === "done"
+      ? "#34d399"
+      : data.status === "error"
+        ? "#f87171"
+        : data.status === "generating" || data.status === "queued"
+          ? "#fbbf24"
+          : "#52525b";
+
   return (
     <div
-      className={`rounded-xl border bg-zinc-900/95 shadow-lg backdrop-blur transition-shadow ${
-        selected ? "shadow-xl" : ""
+      className={`group/node overflow-hidden rounded-2xl border bg-[var(--bg-elevated)]/95 backdrop-blur transition-all duration-150 ${
+        selected
+          ? "shadow-[0_12px_40px_rgba(0,0,0,0.55)]"
+          : "shadow-[0_4px_20px_rgba(0,0,0,0.4)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)]"
       } ${data.kind === "script" ? "w-[480px]" : "w-72"}`}
-      style={{ borderColor: selected ? meta.accent : "#3f3f46" }}
+      style={{
+        borderColor: selected ? meta.accent : "var(--border)",
+        boxShadow: selected ? `0 0 0 1px ${meta.accent}` : undefined,
+      }}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-3 !w-3 !border-2 !border-zinc-900"
-        style={{ background: meta.accent }}
+        className="!border-2"
+        style={{ background: meta.accent, borderColor: "var(--bg-elevated)" }}
       />
       <div
-        className="flex items-center gap-2 rounded-t-xl px-3 py-2 text-xs font-medium text-white"
-        style={{ background: `${meta.accent}26` }}
+        className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-white"
+        style={{
+          background: `linear-gradient(180deg, ${meta.accent}22, ${meta.accent}0d)`,
+          borderBottom: `1px solid ${meta.accent}22`,
+        }}
       >
-        <span>{meta.icon}</span>
-        <span>{isCompose ? "视频合成" : `${meta.label}节点`}</span>
-        <span className="ml-auto truncate text-[10px] text-zinc-400">
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-md text-[12px]"
+          style={{ background: `${meta.accent}2e` }}
+        >
+          {meta.icon}
+        </span>
+        <span className="tracking-tight">
+          {isCompose ? "视频合成" : `${meta.label}节点`}
+        </span>
+        <span
+          className="ml-auto truncate rounded-full bg-black/25 px-2 py-0.5 text-[10px] font-normal text-zinc-300"
+          title={cap.label}
+        >
           {cap.label}
         </span>
+        <span
+          className="h-2 w-2 shrink-0 rounded-full transition-colors"
+          style={{
+            background: statusDot,
+            boxShadow:
+              data.status === "generating" || data.status === "queued"
+                ? `0 0 6px ${statusDot}`
+                : undefined,
+          }}
+        />
       </div>
 
       <div className="p-2">
@@ -621,14 +660,14 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
             <button
               disabled={!!batchBusy}
               onClick={() => void runBatch("images", generateShotImages)}
-              className="flex-1 rounded-md bg-violet-600/80 py-1 text-[11px] font-medium text-white hover:bg-violet-600 disabled:opacity-40"
+              className="flex-1 rounded-lg bg-gradient-to-b from-violet-500 to-violet-600 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all hover:brightness-110 active:scale-95 disabled:opacity-40"
             >
               {batchBusy === "images" ? "分镜图生成中…" : "🖼️ 生成分镜图"}
             </button>
             <button
               disabled={!!batchBusy}
               onClick={() => void runBatch("videos", generateShotVideos)}
-              className="flex-1 rounded-md bg-amber-600/80 py-1 text-[11px] font-medium text-white hover:bg-amber-600 disabled:opacity-40"
+              className="flex-1 rounded-lg bg-gradient-to-b from-amber-500 to-amber-600 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all hover:brightness-110 active:scale-95 disabled:opacity-40"
             >
               {batchBusy === "videos" ? "视频生成中…" : "🎥 批量生成视频"}
             </button>
@@ -658,7 +697,7 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
         )}
       </div>
 
-      <div className="nodrag border-t border-zinc-800 p-2">
+      <div className="nodrag border-t border-[var(--border)] p-2">
         {!isCompose && (
           <div className="relative">
             <textarea
@@ -673,10 +712,10 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
                     : `输入${meta.label}生成提示词…`
               }
               rows={2}
-              className="w-full resize-none rounded-md bg-zinc-800 p-2 text-xs text-zinc-200 outline-none placeholder:text-zinc-500 focus:ring-1"
+              className="w-full resize-none rounded-lg border border-transparent bg-black/30 p-2 text-xs text-zinc-200 outline-none transition-colors placeholder:text-zinc-600 focus:border-[var(--accent)]/60 focus:bg-black/40"
             />
             {slashOpen && slashFiltered.length > 0 && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-48 w-full overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl">
+              <div className="lib-fade-in absolute bottom-full left-0 z-50 mb-1 max-h-48 w-full overflow-auto rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-1 shadow-2xl">
                 {slashFiltered.map((p) => (
                   <button
                     key={p.key}
@@ -685,7 +724,7 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
                       updateNodeData(id, { prompt: p.prompt });
                       setSlashOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-zinc-200 hover:bg-zinc-800"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[11px] text-zinc-200 hover:bg-white/5"
                   >
                     <span>{p.icon}</span>
                     {p.label}
@@ -714,7 +753,7 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
           <select
             value={capabilityKey(cap)}
             onChange={(e) => onModelChange(e.target.value)}
-            className="flex-1 rounded-md bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300 outline-none"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-black/30 px-2 py-1.5 text-[11px] text-zinc-300 outline-none transition-colors hover:border-[var(--border-strong)] focus:border-[var(--accent)]/60"
           >
             {caps.map((c) => {
               const unavailable = availability[c.providerId] === false;
@@ -733,8 +772,10 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
           <button
             onClick={() => void startGeneration(id)}
             disabled={!canGenerate}
-            className="rounded-md px-3 py-1 text-[11px] font-medium text-white transition-opacity disabled:opacity-40"
-            style={{ background: meta.accent }}
+            className="shrink-0 rounded-lg px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-sm transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:brightness-100"
+            style={{
+              background: `linear-gradient(180deg, ${meta.accent}, ${meta.accent}cc)`,
+            }}
           >
             {busy ? (isCompose ? "合成中" : "生成中") : isCompose ? "合成" : "生成"}
           </button>
@@ -744,8 +785,8 @@ function LibNodeInner({ id, data, selected }: NodeProps<LibNodeType>) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-3 !w-3 !border-2 !border-zinc-900"
-        style={{ background: meta.accent }}
+        className="!border-2"
+        style={{ background: meta.accent, borderColor: "var(--bg-elevated)" }}
       />
     </div>
   );

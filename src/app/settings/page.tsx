@@ -101,22 +101,27 @@ export default function SettingsPage() {
     providers.find((p) => p.id === id)?.configured;
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-200">
-      <header className="flex h-12 items-center gap-3 border-b border-zinc-800 px-4">
-        <Link href="/" className="text-sm font-bold tracking-wide text-white">
-          Lib<span className="text-violet-400">TV</span>
+    <main className="min-h-screen bg-[var(--bg)] text-zinc-200">
+      <header className="lib-glass sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-[var(--border)] px-4">
+        <Link href="/" className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-indigo-600 text-[13px] font-black text-white shadow-[0_2px_8px_rgba(139,92,246,0.4)]">
+            L
+          </span>
+          <span className="text-sm font-bold tracking-tight text-white">
+            Lib<span className="text-violet-400">TV</span>
+          </span>
         </Link>
         <span className="text-xs text-zinc-500">设置 · 模型密钥</span>
         <Link
           href="/"
-          className="ml-auto rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+          className="ml-auto rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-[var(--border-strong)] hover:bg-white/5"
         >
           ← 返回画布
         </Link>
       </header>
 
       <div className="mx-auto max-w-2xl p-6">
-        <div className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs leading-relaxed text-zinc-400">
+        <div className="mb-5 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)]/60 p-3.5 text-xs leading-relaxed text-zinc-400">
           密钥只保存在<strong className="text-zinc-200">本机服务端</strong>
           （<code className="text-zinc-300">.data/config.json</code>
           ），浏览器只能看到掩码。留空的密钥字段在保存时
@@ -148,7 +153,7 @@ export default function SettingsPage() {
             {GROUPS.map((group) => (
               <section
                 key={group.title}
-                className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4"
+                className="rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)]/50 p-4 shadow-[0_4px_20px_rgba(0,0,0,0.25)]"
               >
                 <h2 className="text-sm font-semibold text-white">
                   {group.title}
@@ -184,7 +189,7 @@ export default function SettingsPage() {
                               : f.hint || ""
                           }
                           autoComplete="off"
-                          className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-500"
+                          className="w-full rounded-lg border border-[var(--border)] bg-black/30 px-3 py-2 text-xs text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-[var(--accent)]/70 focus:bg-black/40"
                         />
                       </div>
                     );
@@ -199,7 +204,7 @@ export default function SettingsPage() {
           <button
             onClick={save}
             disabled={saving || loading}
-            className="rounded-md bg-violet-600 px-5 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-40"
+            className="rounded-lg bg-gradient-to-b from-violet-500 to-violet-600 px-5 py-2 text-sm font-semibold text-white shadow-[0_4px_16px_rgba(139,92,246,0.35)] transition-all hover:brightness-110 active:scale-95 disabled:opacity-40"
           >
             {saving ? "保存中…" : "保存配置"}
           </button>

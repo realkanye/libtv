@@ -97,25 +97,27 @@ export default function Sidebar({
       key={key}
       title={label}
       onClick={() => setPanel(panel === key ? null : key)}
-      className={`flex h-10 w-10 flex-col items-center justify-center rounded-lg text-base ${
-        panel === key ? "bg-zinc-700" : "hover:bg-zinc-800"
+      className={`flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl text-base transition-all ${
+        panel === key
+          ? "bg-white/10 text-white shadow-inner"
+          : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
       }`}
     >
-      {icon}
-      <span className="text-[8px] text-zinc-400">{label}</span>
+      <span>{icon}</span>
+      <span className="text-[8px] font-medium">{label}</span>
     </button>
   );
 
   return (
     <>
-      <div className="absolute left-4 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900/90 p-2 backdrop-blur">
+      <div className="lib-glass absolute left-4 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1 rounded-2xl border border-[var(--border)] p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.45)]">
         {railBtn("add", "➕", "添加")}
         {railBtn("assets", "📦", "资产")}
         {railBtn("history", "🕘", "历史")}
       </div>
 
       {panel && (
-        <div className="absolute left-20 top-1/2 z-40 max-h-[70vh] w-64 -translate-y-1/2 overflow-auto rounded-xl border border-zinc-800 bg-zinc-900/95 p-3 backdrop-blur">
+        <div className="lib-glass lib-fade-in absolute left-20 top-1/2 z-40 max-h-[72vh] w-64 -translate-y-1/2 overflow-auto rounded-2xl border border-[var(--border)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.5)]">
           {panel === "add" && (
             <div>
               <div className="mb-2 text-[11px] text-zinc-500">添加节点</div>
